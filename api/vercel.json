@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/scorecard.js": {
+      "runtime": "nodejs20.x"
+    }
+  }
+}
