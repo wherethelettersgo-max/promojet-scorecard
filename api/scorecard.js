@@ -18,7 +18,23 @@ function safeJson(res, status, obj) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(obj, null, 2));
 }
+async function verifyTurnstile(token, remoteip) {
+  const secret = process.env.TURNSTILE_SECRET_KEY;
+  if (!secret) throw new Error("TURNSTILE_SECRET_KEY not set");
 
+  const form = new URLSearchParams();
+  form.append("secret", secret);
+  form.append("response", token);
+  if (remoteip) form.append("remoteip", remoteip);
+
+  const r = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+  });
+
+  return r.json();
+}
 function normalizeUrl(input) {
   let u = String(input || "").trim();
   if (!u) throw new Error("Empty url");
