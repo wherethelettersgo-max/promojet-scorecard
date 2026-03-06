@@ -250,6 +250,15 @@ module.exports = async function handler(req, res) {
       (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
       req.socket?.remoteAddress ||
       "unknown";
+    
+        const minuteResult = await minuteLimiter.limit(`scorecard:min:${ip}`);
+
+    res.setHeader("X-RateLimit-Remaining", String(minuteResult.remaining));
+    res.setHeader("X-RateLimit-Reset", String(minuteResult.reset));
+
+    if (!minuteResult.success) {
+      return safeJson(res, 429, { error: "Rate limit exceeded. Please try again shortly." });
+    }
 
     const verification = await verifyTurnstile(turnstileToken, ip);
 
