@@ -289,7 +289,7 @@ Be direct, practical, and avoid fluff.
 If something is unknown, say so in notes_and_assumptions.
 `;
 
-    const user = `
+const user = `
 Audit this website for conversion performance.
 
 Business type: ${business_type}
@@ -297,30 +297,29 @@ Primary goal: ${goal}
 URL: ${targetUrl}
 
 Extracted signals:
-- title: ${basics.title || "(missing)"}
-- meta description: ${basics.metaDesc || "(missing)"}
-- h1: ${basics.h1 || "(missing)"}
-- hasCTAWord: ${basics.hasCTAWord}
-- hasForm: ${basics.hasForm}
-- hasEmail: ${basics.hasEmail}
-- hasPhone: ${basics.hasPhone}
-- hasTrustWords: ${basics.hasTrustWords}
+Title: ${basics.title}
+Meta description: ${basics.metaDesc}
+H1: ${basics.h1}
 
-Heuristic subscores (baseline):
+CTA detected: ${basics.hasCTAWord}
+Contact email: ${basics.hasEmail}
+Phone: ${basics.hasPhone}
+Trust indicators detected: ${basics.hasTrustWords}
+
+Baseline conversion subscores:
 ${JSON.stringify(heur.subscores)}
 
-Page text sample (first 3500 chars):
-${text.slice(0, 3500)}
-
 Instructions:
-- Start from the heuristic baseline, but you may adjust subscores if the text clearly supports it.
-- Emphasize above-the-fold clarity, value proposition, CTA strength, trust signals, and friction.
-- Provide:
-  - top_issues: biggest blockers
-  - quick_wins: highest impact / lowest effort
-  - headline_rewrite_options: write in a clear "who + outcome" style
-  - cta_rewrite_options: specific, action-oriented
-  - recommended_homepage_sections: ordered list of sections for a high-converting homepage
+Generate a practical conversion report based on these signals.
+
+Focus on:
+- clarity of value proposition
+- strength of call-to-action
+- trust signals
+- friction in contacting the business
+- homepage structure
+
+Provide clear improvement suggestions.
 `;
 
     // Call OpenAI Responses API with structured JSON output
