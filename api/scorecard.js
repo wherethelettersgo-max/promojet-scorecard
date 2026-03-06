@@ -14,6 +14,13 @@ const { Ratelimit } = require("@upstash/ratelimit");
 const { Redis } = require("@upstash/redis");
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const redis = Redis.fromEnv();
+
+const minuteLimiter = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(5, "1 m"),
+  analytics: true,
+});
 
 function safeJson(res, status, obj) {
   res.statusCode = status;
