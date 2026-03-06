@@ -240,7 +240,7 @@ module.exports = async function handler(req, res) {
     }
     body = body || {};
 
-    const { turnstileToken } = body;
+        const { turnstileToken } = body;
 
     if (!turnstileToken) {
       return safeJson(res, 400, { error: "Missing bot check token" });
@@ -250,8 +250,8 @@ module.exports = async function handler(req, res) {
       (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
       req.socket?.remoteAddress ||
       "unknown";
-    
-        const minuteResult = await minuteLimiter.limit(`scorecard:min:${ip}`);
+
+    const minuteResult = await minuteLimiter.limit(`scorecard:min:${ip}`);
 
     res.setHeader("X-RateLimit-Remaining", String(minuteResult.remaining));
     res.setHeader("X-RateLimit-Reset", String(minuteResult.reset));
@@ -265,7 +265,6 @@ module.exports = async function handler(req, res) {
     if (!verification.success) {
       return safeJson(res, 403, { error: "Bot check failed" });
     }
-
     const { url, business_type = "service_business", goal = "generate_leads" } = body;
     if (!url) return safeJson(res, 400, { error: "Missing url" });
 
