@@ -160,11 +160,36 @@ function heuristicScore(basics, text) {
 }
 
 function buildFallbackReport(heur, basics) {
+  let summaryParts = [];
+
+  if (heur.subscores.clarity >= 14) {
+    summaryParts.push("The page appears to have a reasonably clear headline and message structure.");
+  } else if (heur.subscores.clarity >= 8) {
+    summaryParts.push("The page shows some message clarity, but the value proposition may still be too vague.");
+  } else {
+    summaryParts.push("The page likely lacks clear above-the-fold messaging and may not explain the offer strongly enough.");
+  }
+
+  if (heur.subscores.cta >= 14) {
+    summaryParts.push("A call to action is present and reasonably visible.");
+  } else if (heur.subscores.cta >= 8) {
+    summaryParts.push("A call to action appears to exist, but it may need to be more prominent or more specific.");
+  } else {
+    summaryParts.push("The page may not be guiding visitors clearly toward a next step.");
+  }
+
+  if (heur.subscores.trust >= 10) {
+    summaryParts.push("Some trust indicators are present, though stronger proof may still improve conversions.");
+  } else {
+    summaryParts.push("Trust signals appear limited and could be reinforced with testimonials, results, or client proof.");
+  }
+
+  const summary = summaryParts.join(" ");
+
   return {
     overall_score: heur.total,
     subscores: heur.subscores,
-    summary:
-      "AI analysis is temporarily unavailable. This report is based on automated on-page signals.",
+    summary,
     top_issues: [
       basics.h1
         ? "Check whether the main headline clearly states who you help and the outcome you deliver."
