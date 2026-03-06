@@ -416,8 +416,14 @@ Provide:
         ],
       };
     } catch (e) {
-      report = buildFallbackReport(heur, basics);
-    }
+  console.error("OPENAI ERROR:", e);
+
+  report = buildFallbackReport(heur, basics);
+  report.notes_and_assumptions = [
+    ...(report.notes_and_assumptions || []),
+    `OpenAI error: ${e?.message || "Unknown error"}`
+  ];
+}
 
     return safeJson(res, 200, {
       url: targetUrl,
