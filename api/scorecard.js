@@ -323,22 +323,71 @@ Provide clear improvement suggestions.
 `;
 
     // Call OpenAI Responses API with structured JSON output
-    const ai = await client.responses.create({
-      model,
-      input: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: SCORECARD_SCHEMA.name,
-          strict: SCORECARD_SCHEMA.strict,
-          schema: SCORECARD_SCHEMA.schema,
-        },
-        verbosity: "medium",
+    let report = null;
+
+try {
+  const ai = await client.responses.create({
+    model,
+    input: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: SCORECARD_SCHEMA.name,
+        strict: SCORECARD_SCHEMA.strict,
+        schema: SCORECARD_SCHEMA.schema,
       },
-    });
+      verbosity: "medium",
+    },
+  });
+
+  const jsonText = ai.output_text || "";
+  report = JSON.parse(jsonText);
+} catch (e) {
+  // Graceful fallback: return something useful without AI
+  report = {
+    overall_score: heur.total,
+    subscores: heur.subscores,
+    summary:
+      "AI analysis is temporarily unavailable. This score is based on automated on-page signals (baseline heuristic).",
+    top_issues: [
+      "AI analysis unavailable (quota/billing).",
+      basics.h1 ? "Review whether your H1 clearly states who you help + outcome." : "Missing or unclear H1 headline.",
+      basics.hasCTAWord ? "CTA detected — verify it is visible above the fold." : "No clear call-to-action language detected.",
+    ].slice(0, 3),
+    quick_wins: [
+      "Add/strengthen a clear above-the-fold headline and subheadline.",
+      "Add one primary CTA above the fold (button) and repeat it mid-page.",
+      "Add trust signals (testimonials, logos, guarantees) near the first CTA.",
+    ],
+    headline_rewrite_options: [
+      "We help [target customer] get [desired outcome] with [service].",
+      "[Service] for [target customer] who want [outcome] — without [pain].",
+      "Get [outcome] with [service] built for [target customer].",
+    ],
+    cta_rewrite_options: [
+      "Get a Quote",
+      "Book a Quick Call",
+      "Request a Website Review",
+    ],
+    recommended_homepage_sections: [
+      "Hero: clear headline + outcome + primary CTA",
+      "Proof: testimonials/logos/results",
+      "Services: 3–6 key offers",
+      "Why choose us / differentiation",
+      "How it works (simple steps)",
+      "Second CTA + contact form",
+      "FAQ",
+      "Footer trust + contact details",
+    ],
+    notes_and_assumptions: [
+      "Fallback mode used because the AI service returned an error (often billing/quota).",
+      "Baseline heuristic uses limited signals from HTML and may miss visual/UX issues.",
+    ],
+  };
+}
 
     // output_text should contain the JSON text per schema
     const jsonText = ai.output_text || "";
