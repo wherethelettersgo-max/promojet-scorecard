@@ -264,7 +264,11 @@ module.exports = async function handler(req, res) {
     if (!minuteResult.success) {
       return safeJson(res, 429, { error: "Rate limit exceeded. Please try again shortly." });
     }
+    const dayResult = await dayLimiter.limit(`scorecard:day:${ip}`);
 
+if (!dayResult.success) {
+  return safeJson(res, 429, { error: "Daily limit reached. Please try again tomorrow." });
+}
     const verification = await verifyTurnstile(turnstileToken, ip);
 
     if (!verification.success) {
