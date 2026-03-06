@@ -211,6 +211,28 @@ const SCORECARD_SCHEMA = {
 };
 
 module.exports = async function handler(req, res) {
+  // ===== CORS (required for browser calls from promojet.com.au) =====
+  const allowedOrigins = new Set([
+    "https://promojet.com.au",
+    "https://www.promojet.com.au",
+  ]);
+
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Max-Age", "86400");
+
+  // Handle browser preflight request
+  if (req.method === "OPTIONS") {
+    res.statusCode = 204;
+    return res.end();
+  }
+  // ================================================================
   // Guard: allow only POST
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
