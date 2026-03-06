@@ -227,7 +227,7 @@ function buildFallbackReport(heur, basics) {
       "Footer with trust and contact details",
     ],
     notes_and_assumptions: [
-      "Fallback mode was used because the AI service was unavailable or over quota.",
+      "Fallback mode was used because the Service was unavailable or over quota.",
       "This automated analysis is based on HTML signals and may miss visual and UX issues.",
     ],
   };
@@ -379,7 +379,7 @@ Provide:
       report = {
         overall_score: heur.total,
         subscores: heur.subscores,
-        summary: aiText || "AI analysis completed.",
+        summary: aiText || "PromoJet analysis completed. Here are the key conversion insights for this page.",
         top_issues: [
           "Review headline clarity and value proposition.",
           "Strengthen the primary call to action.",
@@ -411,7 +411,7 @@ Provide:
           "Footer with trust and contact details",
         ],
         notes_and_assumptions: [
-          "This version uses structured site signals and a concise AI summary.",
+          "PromoJet automated analysis completed. This report is based on on-page signals and conversion best practices.",
           "Visual design and UX were not directly analysed.",
         ],
       };
