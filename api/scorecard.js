@@ -23,7 +23,7 @@ const minuteLimiter = new Ratelimit({
 });
 const dayLimiter = new Ratelimit({
   redis,
-  limiter: Ratelimit.fixedWindow(6, "1 d"),
+  limiter: Ratelimit.fixedWindow(20, "1 d"),
   analytics: true,
 });
 
