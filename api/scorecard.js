@@ -366,6 +366,8 @@ Provide:
     try {
       const ai = await client.responses.create({
         model: process.env.SCORECARD_MODEL || "gpt-5-mini",
+        max_output_tokens: 1000,
+        temperature: 0.4
         input: [
           { role: "system", content: system },
           { role: "user", content: user },
