@@ -10,6 +10,8 @@
  */
 
 const OpenAI = require("openai");
+const { Ratelimit } = require("@upstash/ratelimit");
+const { Redis } = require("@upstash/redis");
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
