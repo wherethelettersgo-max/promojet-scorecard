@@ -6,7 +6,7 @@
  *
  * Optional:
  * - SCORECARD_MAX_HTML_BYTES (default 600000)
- * - SCORECARD_MODEL (default "gpt-5")
+ * - SCORECARD_MODEL (default "gpt-5-mini")
  */
 
 const OpenAI = require("openai");
@@ -25,7 +25,6 @@ function normalizeUrl(input) {
   if (!/^https?:\/\//i.test(u)) u = "https://" + u;
 
   const url = new URL(u);
-
   const host = url.hostname.toLowerCase();
   const blockedHosts = new Set(["localhost", "127.0.0.1", "::1"]);
   if (blockedHosts.has(host)) throw new Error("Blocked host.");
@@ -38,7 +37,7 @@ function stripTags(html) {
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, " ")
     .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, " ");
 
-  const text = noScripts
+  return noScripts
     .replace(/<\/(p|div|br|li|h\d|section|article|header|footer|nav)>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
@@ -47,8 +46,6 @@ function stripTags(html) {
     .replace(/&gt;/g, ">")
     .replace(/\s+/g, " ")
     .trim();
-
-  return text;
 }
 
 function extractBasics(html) {
@@ -69,7 +66,6 @@ function extractBasics(html) {
 
   const ctaRegex =
     /\b(book|call|quote|get a quote|enquire|enquiry|contact|start|buy|shop|subscribe|join|download|request|schedule)\b/i;
-
   const hasCTAWord = ctaRegex.test(text);
 
   const hasEmail = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(html);
@@ -77,7 +73,6 @@ function extractBasics(html) {
 
   const trustRegex =
     /\b(testimonial|reviews?|trusted|clients?|case study|results?|guarantee|rated)\b/i;
-
   const hasTrustWords = trustRegex.test(text);
 
   const hasForm = /<form\b/i.test(html);
@@ -108,27 +103,22 @@ function heuristicScore(basics, text) {
   const hasNav =
     /<nav\b/i.test(text) ||
     /\b(home|about|services|portfolio|contact)\b/i.test(text);
-
   if (hasNav) structure += 8;
 
   const headingMentions =
-    (text.match(/\b(how|why|what|services|pricing|process|results)\b/gi) || [])
-      .length;
-
+    (text.match(/\b(how|why|what|services|pricing|process|results)\b/gi) || []).length;
   if (headingMentions >= 5) structure += 7;
 
   const offerHits =
     text.match(
       /\b(website|web design|graphic design|branding|maintenance|hosting|support|conversion|seo|landing page)\b/gi
     ) || [];
-
   offer += Math.min(15, offerHits.length >= 6 ? 15 : offerHits.length * 2);
 
   friction = 15;
   if (!basics.hasForm) friction -= 6;
   if (!basics.hasEmail && !basics.hasPhone) friction -= 6;
   if (!basics.hasCTAWord) friction -= 3;
-
   friction = Math.max(0, friction);
 
   const total = clarity + cta + trust + structure + offer + friction;
@@ -139,9 +129,56 @@ function heuristicScore(basics, text) {
   };
 }
 
-module.exports = async function handler(req, res) {
+function buildFallbackReport(heur, basics) {
+  return {
+    overall_score: heur.total,
+    subscores: heur.subscores,
+    summary:
+      "AI analysis is temporarily unavailable. This report is based on automated on-page signals.",
+    top_issues: [
+      basics.h1
+        ? "Check whether the main headline clearly states who you help and the outcome you deliver."
+        : "Missing or unclear main headline (H1).",
+      basics.hasCTAWord
+        ? "A call to action was detected, but it should be checked for clarity and above-the-fold visibility."
+        : "No clear call-to-action language was detected.",
+      basics.hasTrustWords
+        ? "Trust language exists, but it may need stronger proof such as testimonials, results, or logos."
+        : "Few or no trust indicators were detected.",
+    ],
+    quick_wins: [
+      "Add or strengthen a clear above-the-fold headline and subheadline.",
+      "Add one strong primary call to action near the top of the page.",
+      "Add trust signals such as testimonials, client logos, or guarantees near the first CTA.",
+    ],
+    headline_rewrite_options: [
+      "We help [target customer] achieve [desired outcome] with [service].",
+      "[Service] for [target customer] who want [outcome] without [pain point].",
+      "Get [outcome] with [service] built for [target customer].",
+    ],
+    cta_rewrite_options: [
+      "Get a Quote",
+      "Book a Quick Call",
+      "Request a Website Review",
+    ],
+    recommended_homepage_sections: [
+      "Hero: headline, subheadline, and primary CTA",
+      "Proof: testimonials, logos, or results",
+      "Services overview",
+      "Why choose us / differentiation",
+      "How it works",
+      "Second CTA and contact form",
+      "FAQ",
+      "Footer with trust and contact details",
+    ],
+    notes_and_assumptions: [
+      "Fallback mode was used because the AI service was unavailable or over quota.",
+      "This automated analysis is based on HTML signals and may miss visual and UX issues.",
+    ],
+  };
+}
 
-  // CORS
+module.exports = async function handler(req, res) {
   const allowedOrigins = new Set([
     "https://promojet.com.au",
     "https://www.promojet.com.au",
@@ -168,28 +205,26 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-
     let body = req.body;
-
     if (typeof body === "string") {
-      try { body = JSON.parse(body); } catch { body = {}; }
+      try {
+        body = JSON.parse(body);
+      } catch {
+        body = {};
+      }
     }
-
     body = body || {};
 
     const { url, business_type = "service_business", goal = "generate_leads" } = body;
-
     if (!url) return safeJson(res, 400, { error: "Missing url" });
 
     const targetUrl = normalizeUrl(url);
-
     const maxBytes = parseInt(process.env.SCORECARD_MAX_HTML_BYTES || "600000", 10);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 12000);
 
     let resp;
-
     try {
       resp = await fetch(targetUrl, {
         signal: controller.signal,
@@ -204,40 +239,47 @@ module.exports = async function handler(req, res) {
     }
 
     const html = (await resp.text()).slice(0, maxBytes);
-
     const basics = extractBasics(html);
     const text = stripTags(html);
-
     const heur = heuristicScore(basics, text);
 
     const system = `
 You are a conversion-rate optimisation auditor.
-Provide practical advice based on the signals given.
+Return practical, concise website conversion advice in JSON-compatible plain text sections.
 `;
 
     const user = `
-Audit this website.
+Audit this website for conversion performance.
 
+Business type: ${business_type}
+Primary goal: ${goal}
+URL: ${targetUrl}
+
+Extracted signals:
 Title: ${basics.title}
 Meta description: ${basics.metaDesc}
 H1: ${basics.h1}
-
 CTA detected: ${basics.hasCTAWord}
-Email detected: ${basics.hasEmail}
-Phone detected: ${basics.hasPhone}
-Trust signals: ${basics.hasTrustWords}
+Contact email: ${basics.hasEmail}
+Phone: ${basics.hasPhone}
+Trust indicators detected: ${basics.hasTrustWords}
 
-Baseline scores:
+Baseline conversion subscores:
 ${JSON.stringify(heur.subscores)}
 
-Goal: ${goal}
-Business type: ${business_type}
+Provide:
+1. Short summary
+2. Top 3 issues
+3. Top 3 quick wins
+4. 3 headline rewrite options
+5. 3 CTA rewrite options
+6. Recommended homepage section order
+7. Notes and assumptions
 `;
 
     let report = null;
 
     try {
-
       const ai = await client.responses.create({
         model: process.env.SCORECARD_MODEL || "gpt-5-mini",
         input: [
@@ -246,21 +288,49 @@ Business type: ${business_type}
         ],
       });
 
+      const aiText = (ai.output_text || "").trim();
+
       report = {
         overall_score: heur.total,
         subscores: heur.subscores,
-        summary: ai.output_text,
+        summary: aiText || "AI analysis completed.",
+        top_issues: [
+          "Review headline clarity and value proposition.",
+          "Strengthen the primary call to action.",
+          "Add clearer trust signals near the top of the page.",
+        ],
+        quick_wins: [
+          "Tighten the headline to make the offer clearer.",
+          "Place one primary CTA above the fold.",
+          "Add testimonials, logos, or proof points.",
+        ],
+        headline_rewrite_options: [
+          "We help [target customer] achieve [desired outcome] with [service].",
+          "[Service] for [target customer] who want [outcome] without [pain point].",
+          "Get [outcome] with [service] built for [target customer].",
+        ],
+        cta_rewrite_options: [
+          "Get a Quote",
+          "Book a Quick Call",
+          "Request a Website Review",
+        ],
+        recommended_homepage_sections: [
+          "Hero: headline, subheadline, and primary CTA",
+          "Proof: testimonials, logos, or results",
+          "Services overview",
+          "Why choose us / differentiation",
+          "How it works",
+          "Second CTA and contact form",
+          "FAQ",
+          "Footer with trust and contact details",
+        ],
+        notes_and_assumptions: [
+          "This version uses structured site signals and a concise AI summary.",
+          "Visual design and UX were not directly analysed.",
+        ],
       };
-
     } catch (e) {
-
-      report = {
-        overall_score: heur.total,
-        subscores: heur.subscores,
-        summary:
-          "AI analysis unavailable. Showing baseline automated analysis.",
-      };
-
+      report = buildFallbackReport(heur, basics);
     }
 
     return safeJson(res, 200, {
@@ -268,7 +338,6 @@ Business type: ${business_type}
       baseline: { overall: heur.total, subscores: heur.subscores, basics },
       report,
     });
-
   } catch (err) {
     return safeJson(res, 500, { error: err?.message || "Server error" });
   }
