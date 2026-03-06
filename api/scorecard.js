@@ -231,6 +231,23 @@ module.exports = async function handler(req, res) {
     }
     body = body || {};
 
+    const { turnstileToken } = body;
+
+    if (!turnstileToken) {
+      return safeJson(res, 400, { error: "Missing bot check token" });
+    }
+
+    const ip =
+      (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
+      req.socket?.remoteAddress ||
+      "unknown";
+
+    const verification = await verifyTurnstile(turnstileToken, ip);
+
+    if (!verification.success) {
+      return safeJson(res, 403, { error: "Bot check failed" });
+    }
+
     const { url, business_type = "service_business", goal = "generate_leads" } = body;
     if (!url) return safeJson(res, 400, { error: "Missing url" });
 
