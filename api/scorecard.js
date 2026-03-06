@@ -18,7 +18,12 @@ const redis = Redis.fromEnv();
 
 const minuteLimiter = new Ratelimit({
   redis,
-  limiter: Ratelimit.slidingWindow(3, "1 m"),
+  limiter: Ratelimit.slidingWindow(5, "1 m"),
+  analytics: true,
+});
+const dayLimiter = new Ratelimit({
+  redis,
+  limiter: Ratelimit.fixedWindow(30, "1 d"),
   analytics: true,
 });
 
