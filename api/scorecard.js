@@ -329,10 +329,11 @@ if (!dayResult.success) {
 
     const system = `
 You are a conversion-rate optimisation auditor.
-Return practical, concise website conversion advice in JSON-compatible plain text sections.
+Return valid JSON only.
+Do not include markdown fences.
 `;
 
-    const user = `
+const user = `
 Audit this website for conversion performance.
 
 Business type: ${business_type}
@@ -351,16 +352,17 @@ Trust indicators detected: ${basics.hasTrustWords}
 Baseline conversion subscores:
 ${JSON.stringify(heur.subscores)}
 
-Provide:
-1. Short summary
-2. Top 3 issues
-3. Top 3 quick wins
-4. 3 headline rewrite options
-5. 3 CTA rewrite options
-6. Recommended homepage section order
-7. Notes and assumptions
+Return a JSON object with these keys:
+{
+  "summary": "string",
+  "top_issues": ["string","string","string"],
+  "quick_wins": ["string","string","string"],
+  "headline_rewrite_options": ["string","string","string"],
+  "cta_rewrite_options": ["string","string","string"],
+  "recommended_homepage_sections": ["string","string","string","string","string","string"],
+  "notes_and_assumptions": ["string","string"]
+}
 `;
-
     let report = null;
 
     try {
