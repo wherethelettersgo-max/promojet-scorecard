@@ -38,7 +38,7 @@ function stripTags(html) {
     .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, " ");
 
   return noScripts
-    .replace(/<\/(p|div|br|li|h\\d|section|article|header|footer|nav)>/gi, "\n")
+    .replace(/<\/(p|div|br|li|h\d|section|article|header|footer|nav)>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
@@ -90,6 +90,8 @@ function extractBasics(html) {
 }
 
 module.exports = async function handler(req, res) {
+  res.setHeader("X-PromoJet-Version", "full-report-v3");
+
   const allowedOrigins = new Set([
     "https://promojet.com.au",
     "https://www.promojet.com.au",
@@ -152,11 +154,11 @@ module.exports = async function handler(req, res) {
     const html = (await resp.text()).slice(0, maxBytes);
     const basics = extractBasics(html);
     const text = stripTags(html);
-    const pageSample = text.slice(0, 2200);
+    const pageSample = text.slice(0, 1200);
 
     const ai = await client.responses.create({
       model: process.env.SCORECARD_MODEL || "gpt-5-mini",
-      max_output_tokens: 1500,
+      max_output_tokens: 1200,
       input: [
         {
           role: "system",
@@ -190,7 +192,8 @@ Return only JSON with:
 - recommended_homepage_sections (7 items)
 - notes_and_assumptions (2 items)
 
-Make the suggestions specific to this business and page.`
+Make the suggestions specific to this business and page.
+Keep each item concise enough to fit naturally in a report.`
         }
       ],
       text: {
@@ -239,6 +242,10 @@ Make the suggestions specific to this business and page.`
     });
 
     const aiText = (ai.output_text || "").trim();
+
+    console.log("OpenAI full-report status:", ai.status);
+    console.log("OpenAI full-report incomplete details:", ai.incomplete_details || null);
+    console.log("OpenAI full-report output length:", aiText.length);
 
     if (ai.status === "incomplete") {
       throw new Error(
