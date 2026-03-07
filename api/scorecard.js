@@ -100,9 +100,9 @@ function extractBasics(html) {
 
   const text = stripTags(html);
 
-  const ctaRegex =
+  const callToActionRegex =
     /\b(book|call|quote|get a quote|enquire|enquiry|contact|start|buy|shop|subscribe|join|download|request|schedule)\b/i;
-  const hasCTAWord = ctaRegex.test(text);
+  const hasCallToActionWord = callToActionRegex.test(text);
 
   const hasEmail = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(html);
   const hasPhone = /(\+?\d[\d\s().-]{7,}\d)/.test(html);
@@ -113,12 +113,21 @@ function extractBasics(html) {
 
   const hasForm = /<form\b/i.test(html);
 
-  return { title, metaDesc, h1, hasCTAWord, hasEmail, hasPhone, hasTrustWords, hasForm };
+  return {
+    title,
+    metaDesc,
+    h1,
+    hasCallToActionWord,
+    hasEmail,
+    hasPhone,
+    hasTrustWords,
+    hasForm,
+  };
 }
 
 function heuristicScore(basics, text) {
   let clarity = 0;
-  let cta = 0;
+  let call_to_action = 0;
   let trust = 0;
   let structure = 0;
   let offer = 0;
@@ -128,9 +137,9 @@ function heuristicScore(basics, text) {
   if (basics.metaDesc.length >= 50 && basics.metaDesc.length <= 170) clarity += 4;
   if (basics.title.length >= 10 && basics.title.length <= 70) clarity += 4;
 
-  if (basics.hasCTAWord) cta += 10;
-  if (basics.hasForm) cta += 6;
-  if (basics.hasEmail || basics.hasPhone) cta += 4;
+  if (basics.hasCallToActionWord) call_to_action += 10;
+  if (basics.hasForm) call_to_action += 6;
+  if (basics.hasEmail || basics.hasPhone) call_to_action += 4;
 
   if (basics.hasTrustWords) trust += 10;
   if (basics.hasEmail) trust += 2;
@@ -154,14 +163,14 @@ function heuristicScore(basics, text) {
   friction = 15;
   if (!basics.hasForm) friction -= 6;
   if (!basics.hasEmail && !basics.hasPhone) friction -= 6;
-  if (!basics.hasCTAWord) friction -= 3;
+  if (!basics.hasCallToActionWord) friction -= 3;
   friction = Math.max(0, friction);
 
-  const total = clarity + cta + trust + structure + offer + friction;
+  const total = clarity + call_to_action + trust + structure + offer + friction;
 
   return {
     total,
-    subscores: { clarity, cta, trust, structure, offer, friction },
+    subscores: { clarity, call_to_action, trust, structure, offer, friction },
   };
 }
 
@@ -182,11 +191,11 @@ function buildFallbackReport(heur, basics) {
     );
   }
 
-  if (heur.subscores.cta >= 14) {
+  if (heur.subscores.call_to_action >= 14) {
     summaryParts.push(
       "A Call to Action appears to be present and reasonably visible, though stronger wording may improve enquiries."
     );
-  } else if (heur.subscores.cta >= 8) {
+  } else if (heur.subscores.call_to_action >= 8) {
     summaryParts.push(
       "A Call to Action appears to exist, but it may not be prominent or persuasive enough."
     );
@@ -212,7 +221,7 @@ function buildFallbackReport(heur, basics) {
       basics.h1
         ? "Check whether the main headline clearly states who you help and the outcome you deliver."
         : "Missing or unclear main headline (H1).",
-      basics.hasCTAWord
+      basics.hasCallToActionWord
         ? "A Call to Action was detected, but it should be checked for clarity, strength, and above-the-fold visibility."
         : "No clear Call to Action language was detected.",
       basics.hasTrustWords
@@ -349,7 +358,7 @@ module.exports = async function handler(req, res) {
 
     let report = null;
 
-        try {
+    try {
       const ai = await client.responses.create({
         model: process.env.SCORECARD_MODEL || "gpt-5-mini",
         max_output_tokens: 1400,
@@ -371,7 +380,7 @@ Extracted signals:
 Title: ${basics.title}
 Meta description: ${basics.metaDesc}
 H1: ${basics.h1}
-Call to Action detected: ${basics.hasCTAWord}
+Call to Action detected: ${basics.hasCallToActionWord}
 Email detected: ${basics.hasEmail}
 Phone detected: ${basics.hasPhone}
 Trust indicators detected: ${basics.hasTrustWords}
@@ -459,20 +468,14 @@ Return only JSON matching the requested schema.`,
         },
       });
 
-      // Safer extraction
       const aiText = (ai.output_text || "").trim();
 
-      // Useful diagnostics
       console.log("OpenAI response status:", ai.status);
       console.log("OpenAI output_text length:", aiText.length);
 
       if (!aiText) {
-        // Check for refusal or missing content
         const firstOutput = ai.output && ai.output[0];
-        const firstContent =
-          firstOutput &&
-          firstOutput.content &&
-          firstOutput.content[0];
+        const firstContent = firstOutput && firstOutput.content && firstOutput.content[0];
 
         if (firstContent && firstContent.type === "refusal") {
           throw new Error(`Model refusal: ${firstContent.refusal || "No refusal text returned"}`);
@@ -508,26 +511,6 @@ Return only JSON matching the requested schema.`,
         `Fallback mode was used because the AI request failed: ${e?.message || "Unknown error"}`,
         "This automated analysis is based on HTML signals and a limited text sample, so it may miss visual and UX issues.",
       ];
-    }
-      
-
-      const aiText = (ai.output_text || "").trim();
-      const parsed = JSON.parse(aiText);
-
-      report = {
-        overall_score: heur.total,
-        subscores: heur.subscores,
-        summary: parsed.summary,
-        top_issues: parsed.top_issues,
-        quick_wins: parsed.quick_wins,
-        headline_rewrite_options: parsed.headline_rewrite_options,
-        cta_rewrite_options: parsed.cta_rewrite_options,
-        recommended_homepage_sections: parsed.recommended_homepage_sections,
-        notes_and_assumptions: parsed.notes_and_assumptions,
-      };
-    } catch (e) {
-      console.error("OPENAI ERROR:", e);
-      report = buildFallbackReport(heur, basics);
     }
 
     return safeJson(res, 200, {
