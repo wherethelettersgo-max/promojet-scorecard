@@ -169,25 +169,39 @@ function buildFallbackReport(heur, basics) {
   const summaryParts = [];
 
   if (heur.subscores.clarity >= 14) {
-    summaryParts.push("The page appears to have reasonably clear messaging, although the commercial value proposition may still need sharpening.");
+    summaryParts.push(
+      "The page appears to have reasonably clear messaging, although the commercial value proposition may still need sharpening."
+    );
   } else if (heur.subscores.clarity >= 8) {
-    summaryParts.push("The page shows some message clarity, but the value proposition may still be too vague or too weak above the fold.");
+    summaryParts.push(
+      "The page shows some message clarity, but the value proposition may still be too vague or too weak above the fold."
+    );
   } else {
-    summaryParts.push("The page likely lacks clear above-the-fold messaging and may not explain the offer strongly enough for cold visitors.");
+    summaryParts.push(
+      "The page likely lacks clear above-the-fold messaging and may not explain the offer strongly enough for cold visitors."
+    );
   }
 
   if (heur.subscores.cta >= 14) {
-    summaryParts.push("A call to action appears to be present and reasonably visible, though stronger wording may improve enquiries.");
+    summaryParts.push(
+      "A Call to Action appears to be present and reasonably visible, though stronger wording may improve enquiries."
+    );
   } else if (heur.subscores.cta >= 8) {
-    summaryParts.push("A call to action appears to exist, but it may not be prominent or persuasive enough.");
+    summaryParts.push(
+      "A Call to Action appears to exist, but it may not be prominent or persuasive enough."
+    );
   } else {
     summaryParts.push("The page may not be guiding visitors clearly toward a next step.");
   }
 
   if (heur.subscores.trust >= 10) {
-    summaryParts.push("Some trust indicators are present, but stronger proof near conversion points would likely help.");
+    summaryParts.push(
+      "Some trust indicators are present, but stronger proof near conversion points would likely help."
+    );
   } else {
-    summaryParts.push("Trust signals appear limited and could be reinforced with testimonials, results, guarantees, or client proof.");
+    summaryParts.push(
+      "Trust signals appear limited and could be reinforced with testimonials, results, guarantees, or client proof."
+    );
   }
 
   return {
@@ -199,16 +213,18 @@ function buildFallbackReport(heur, basics) {
         ? "Check whether the main headline clearly states who you help and the outcome you deliver."
         : "Missing or unclear main headline (H1).",
       basics.hasCTAWord
-        ? "A call to action was detected, but it should be checked for clarity, strength, and above-the-fold visibility."
-        : "No clear call-to-action language was detected.",
+        ? "A Call to Action was detected, but it should be checked for clarity, strength, and above-the-fold visibility."
+        : "No clear Call to Action language was detected.",
       basics.hasTrustWords
         ? "Trust language exists, but it may need stronger proof such as testimonials, results, logos, or guarantees."
         : "Few or no trust indicators were detected.",
+      "The page may not be making the business value proposition strong enough for first-time visitors.",
     ],
     quick_wins: [
       "Strengthen the above-the-fold headline and subheadline so the offer is clearer within a few seconds.",
-      "Add one strong primary call to action near the top of the page and repeat it later in the page.",
-      "Add stronger proof such as testimonials, client logos, guarantees, or results near the first CTA.",
+      "Add one strong primary Call to Action near the top of the page and repeat it later in the page.",
+      "Add stronger proof such as testimonials, client logos, guarantees, or results near the first Call to Action.",
+      "Reduce friction by making contact options, enquiry pathways, and next steps more obvious.",
     ],
     headline_rewrite_options: [
       "We help [target customer] achieve [desired outcome] with [service].",
@@ -219,20 +235,21 @@ function buildFallbackReport(heur, basics) {
       "Get a Quote",
       "Book a Quick Call",
       "Request a Website Review",
+      "Talk to Us About Your Project",
     ],
     recommended_homepage_sections: [
-      "Hero: headline, subheadline, and primary CTA",
+      "Hero: headline, subheadline, and primary Call to Action",
       "Proof: testimonials, logos, or results",
       "Services overview",
       "Why choose us / differentiation",
       "How it works",
-      "Second CTA and contact form",
+      "Second Call to Action and contact form",
       "FAQ",
       "Footer with trust and contact details",
     ],
     notes_and_assumptions: [
       "Fallback mode was used because the AI service was unavailable or over quota.",
-      "This automated analysis is based on HTML signals and may miss visual and UX issues.",
+      "This automated analysis is based on HTML signals and a limited text sample, so it may miss visual and UX issues.",
     ],
   };
 }
@@ -327,6 +344,7 @@ module.exports = async function handler(req, res) {
     const html = (await resp.text()).slice(0, maxBytes);
     const basics = extractBasics(html);
     const text = stripTags(html);
+    const pageSample = text.slice(0, 2500);
     const heur = heuristicScore(basics, text);
 
     let report = null;
@@ -334,12 +352,12 @@ module.exports = async function handler(req, res) {
     try {
       const ai = await client.responses.create({
         model: process.env.SCORECARD_MODEL || "gpt-5-mini",
-        max_output_tokens: 1100,
+        max_output_tokens: 1400,
         input: [
           {
             role: "system",
             content:
-              "You are a sharp conversion-rate optimisation auditor. Return only strict JSON matching the requested schema. Be commercially useful, concrete, and specific. Do not write generic filler."
+              "You are an expert conversion rate optimisation consultant writing a real website conversion audit. Return only strict JSON matching the requested schema. Be specific, commercially useful, practical, and concrete. Do not write generic filler. Write for business owners, not marketers. Use the phrase 'Call to Action' instead of 'CTA'.",
           },
           {
             role: "user",
@@ -353,7 +371,7 @@ Extracted signals:
 Title: ${basics.title}
 Meta description: ${basics.metaDesc}
 H1: ${basics.h1}
-CTA detected: ${basics.hasCTAWord}
+Call to Action detected: ${basics.hasCTAWord}
 Email detected: ${basics.hasEmail}
 Phone detected: ${basics.hasPhone}
 Trust indicators detected: ${basics.hasTrustWords}
@@ -362,8 +380,23 @@ Form detected: ${basics.hasForm}
 Baseline conversion subscores:
 ${JSON.stringify(heur.subscores)}
 
-Produce a commercially useful CRO report. The summary must be detailed, specific, and written as a real assessment of likely conversion performance.`
-          }
+Page content sample:
+${pageSample}
+
+Return a highly practical CRO report.
+
+Requirements:
+- The summary must be detailed and specific to this website.
+- Explain what appears to be working, what is likely hurting conversions, and what the commercial opportunity is.
+- Top issues must be concrete and specific, not generic.
+- Quick wins must be immediately actionable.
+- Headline rewrite options must sound like real website headlines for this business.
+- Call to Action rewrite options must be specific and realistic.
+- Recommended homepage sections must be ordered and practical.
+- Notes and assumptions should explain limits of the analysis.
+
+Return only JSON matching the requested schema.`,
+          },
         ],
         text: {
           format: {
@@ -377,40 +410,40 @@ Produce a commercially useful CRO report. The summary must be detailed, specific
                 summary: { type: "string" },
                 top_issues: {
                   type: "array",
-                  minItems: 3,
-                  maxItems: 5,
-                  items: { type: "string" }
+                  minItems: 4,
+                  maxItems: 6,
+                  items: { type: "string" },
                 },
                 quick_wins: {
                   type: "array",
-                  minItems: 3,
-                  maxItems: 5,
-                  items: { type: "string" }
+                  minItems: 4,
+                  maxItems: 6,
+                  items: { type: "string" },
                 },
                 headline_rewrite_options: {
                   type: "array",
                   minItems: 3,
                   maxItems: 4,
-                  items: { type: "string" }
+                  items: { type: "string" },
                 },
                 cta_rewrite_options: {
                   type: "array",
                   minItems: 3,
                   maxItems: 4,
-                  items: { type: "string" }
+                  items: { type: "string" },
                 },
                 recommended_homepage_sections: {
                   type: "array",
-                  minItems: 6,
+                  minItems: 7,
                   maxItems: 10,
-                  items: { type: "string" }
+                  items: { type: "string" },
                 },
                 notes_and_assumptions: {
                   type: "array",
                   minItems: 2,
                   maxItems: 4,
-                  items: { type: "string" }
-                }
+                  items: { type: "string" },
+                },
               },
               required: [
                 "summary",
@@ -419,11 +452,11 @@ Produce a commercially useful CRO report. The summary must be detailed, specific
                 "headline_rewrite_options",
                 "cta_rewrite_options",
                 "recommended_homepage_sections",
-                "notes_and_assumptions"
-              ]
-            }
-          }
-        }
+                "notes_and_assumptions",
+              ],
+            },
+          },
+        },
       });
 
       const aiText = (ai.output_text || "").trim();
