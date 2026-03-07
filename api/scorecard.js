@@ -373,46 +373,69 @@ Provide:
         ],
       });
 
-      const aiText = (ai.output_text || "").trim();
+const aiText = (ai.output_text || "").trim();
 
-      report = {
-        overall_score: heur.total,
-        subscores: heur.subscores,
-        summary: aiText || "PromoJet analysis completed. Here are the key conversion insights for this page.",
-        top_issues: [
-          "Review headline clarity and value proposition.",
-          "Strengthen the primary call to action.",
-          "Add clearer trust signals near the top of the page.",
-        ],
-        quick_wins: [
-          "Tighten the headline to make the offer clearer.",
-          "Place one primary CTA above the fold.",
-          "Add testimonials, logos, or proof points.",
-        ],
-        headline_rewrite_options: [
-          "We help [target customer] achieve [desired outcome] with [service].",
-          "[Service] for [target customer] who want [outcome] without [pain point].",
-          "Get [outcome] with [service] built for [target customer].",
-        ],
-        cta_rewrite_options: [
-          "Get a Quote",
-          "Book a Quick Call",
-          "Request a Website Review",
-        ],
-        recommended_homepage_sections: [
-          "Hero: headline, subheadline, and primary CTA",
-          "Proof: testimonials, logos, or results",
-          "Services overview",
-          "Why choose us / differentiation",
-          "How it works",
-          "Second CTA and contact form",
-          "FAQ",
-          "Footer with trust and contact details",
-        ],
-        notes_and_assumptions: [
-          "PromoJet automated analysis completed. This report is based on on-page signals and conversion best practices.",
-          "Visual design and UX were not directly analysed.",
-        ],
+let parsed = null;
+try {
+  parsed = JSON.parse(aiText);
+} catch {
+  parsed = null;
+}
+
+report = {
+  overall_score: heur.total,
+  subscores: heur.subscores,
+  summary:
+    parsed?.summary ||
+    aiText ||
+    "PromoJet analysis completed. Here are the key conversion insights for this page.",
+
+  top_issues:
+    parsed?.top_issues || [
+      "Review headline clarity and value proposition.",
+      "Strengthen the primary call to action.",
+      "Add clearer trust signals near the top of the page.",
+    ],
+
+  quick_wins:
+    parsed?.quick_wins || [
+      "Tighten the headline to make the offer clearer.",
+      "Place one primary CTA above the fold.",
+      "Add testimonials, logos, or proof points.",
+    ],
+
+  headline_rewrite_options:
+    parsed?.headline_rewrite_options || [
+      "We help [target customer] achieve [desired outcome] with [service].",
+      "[Service] for [target customer] who want [outcome] without [pain point].",
+      "Get [outcome] with [service] built for [target customer].",
+    ],
+
+  cta_rewrite_options:
+    parsed?.cta_rewrite_options || [
+      "Get a Quote",
+      "Book a Quick Call",
+      "Request a Website Review",
+    ],
+
+  recommended_homepage_sections:
+    parsed?.recommended_homepage_sections || [
+      "Hero: headline, subheadline, and primary CTA",
+      "Proof: testimonials, logos, or results",
+      "Services overview",
+      "Why choose us / differentiation",
+      "How it works",
+      "Second CTA and contact form",
+      "FAQ",
+      "Footer with trust and contact details",
+    ],
+
+  notes_and_assumptions:
+    parsed?.notes_and_assumptions || [
+      "PromoJet automated analysis completed. This report is based on on-page signals and conversion best practices.",
+      "Visual design and UX were not directly analysed.",
+    ],
+};
       };
     } catch (e) {
   report = buildFallbackReport(heur, basics);
