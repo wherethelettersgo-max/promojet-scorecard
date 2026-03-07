@@ -237,6 +237,8 @@ function buildFallbackTeaser(heur, basics) {
 }
 
 module.exports = async function handler(req, res) {
+  res.setHeader("X-PromoJet-Version", "scorecard-split-v3");
+
   const allowedOrigins = new Set([
     "https://promojet.com.au",
     "https://www.promojet.com.au",
@@ -326,7 +328,7 @@ module.exports = async function handler(req, res) {
     const html = (await resp.text()).slice(0, maxBytes);
     const basics = extractBasics(html);
     const text = stripTags(html);
-    const pageSample = text.slice(0, 900);
+    const pageSample = text.slice(0, 700);
     const heur = heuristicScore(basics, text);
 
     let report = null;
@@ -372,7 +374,7 @@ Return only JSON with:
 - notes_and_assumptions (2 items)
 
 Requirements:
-- The summary must be detailed, specific, and commercially useful.
+- The summary must be specific, commercially useful, and concise enough to fit in 120 to 170 words.
 - Explain what is working, what is hurting conversions, and what the opportunity is.
 - Top issues must be concrete and specific.
 - Quick wins must be immediately actionable.`
