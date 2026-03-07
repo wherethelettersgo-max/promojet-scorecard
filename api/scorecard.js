@@ -3,6 +3,9 @@
  *
  * Required env vars:
  * - OPENAI_API_KEY
+ * - TURNSTILE_SECRET_KEY
+ * - UPSTASH_REDIS_REST_URL
+ * - UPSTASH_REDIS_REST_TOKEN
  *
  * Optional:
  * - SCORECARD_MAX_HTML_BYTES (default 600000)
@@ -21,6 +24,7 @@ const minuteLimiter = new Ratelimit({
   limiter: Ratelimit.slidingWindow(5, "1 m"),
   analytics: true,
 });
+
 const dayLimiter = new Ratelimit({
   redis,
   limiter: Ratelimit.fixedWindow(20, "1 d"),
@@ -32,6 +36,7 @@ function safeJson(res, status, obj) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(obj, null, 2));
 }
+
 async function verifyTurnstile(token, remoteip) {
   const secret = process.env.TURNSTILE_SECRET_KEY;
   if (!secret) throw new Error("TURNSTILE_SECRET_KEY not set");
@@ -49,6 +54,7 @@ async function verifyTurnstile(token, remoteip) {
 
   return r.json();
 }
+
 function normalizeUrl(input) {
   let u = String(input || "").trim();
   if (!u) throw new Error("Empty url");
@@ -160,7 +166,7 @@ function heuristicScore(basics, text) {
 }
 
 function buildFallbackReport(heur, basics) {
-  let summaryParts = [];
+  const summaryParts = [];
 
   if (heur.subscores.clarity >= 14) {
     summaryParts.push("The page appears to have a reasonably clear headline and message structure.");
@@ -184,12 +190,10 @@ function buildFallbackReport(heur, basics) {
     summaryParts.push("Trust signals appear limited and could be reinforced with testimonials, results, or client proof.");
   }
 
-  const summary = summaryParts.join(" ");
-
   return {
     overall_score: heur.total,
     subscores: heur.subscores,
-    summary,
+    summary: summaryParts.join(" "),
     top_issues: [
       basics.h1
         ? "Check whether the main headline clearly states who you help and the outcome you deliver."
@@ -227,7 +231,7 @@ function buildFallbackReport(heur, basics) {
       "Footer with trust and contact details",
     ],
     notes_and_assumptions: [
-      "Fallback mode was used because the Service was unavailable or over quota.",
+      "Fallback mode was used because the service was unavailable or over quota.",
       "This automated analysis is based on HTML signals and may miss visual and UX issues.",
     ],
   };
@@ -270,7 +274,7 @@ module.exports = async function handler(req, res) {
     }
     body = body || {};
 
-        const { turnstileToken } = body;
+    const { turnstileToken } = body;
 
     if (!turnstileToken) {
       return safeJson(res, 400, { error: "Missing bot check token" });
@@ -282,23 +286,23 @@ module.exports = async function handler(req, res) {
       "unknown";
 
     const minuteResult = await minuteLimiter.limit(`scorecard:min:${ip}`);
-
     res.setHeader("X-RateLimit-Remaining", String(minuteResult.remaining));
     res.setHeader("X-RateLimit-Reset", String(minuteResult.reset));
 
     if (!minuteResult.success) {
       return safeJson(res, 429, { error: "Rate limit exceeded. Please try again shortly." });
     }
+
     const dayResult = await dayLimiter.limit(`scorecard:day:${ip}`);
+    if (!dayResult.success) {
+      return safeJson(res, 429, { error: "Daily limit reached. Please try again tomorrow." });
+    }
 
-if (!dayResult.success) {
-  return safeJson(res, 429, { error: "Daily limit reached. Please try again tomorrow." });
-}
     const verification = await verifyTurnstile(turnstileToken, ip);
-
     if (!verification.success) {
       return safeJson(res, 403, { error: "Bot check failed" });
     }
+
     const { url, business_type = "service_business", goal = "generate_leads" } = body;
     if (!url) return safeJson(res, 400, { error: "Missing url" });
 
@@ -327,121 +331,110 @@ if (!dayResult.success) {
     const text = stripTags(html);
     const heur = heuristicScore(basics, text);
 
-    const system = `
-You are a conversion-rate optimisation auditor.
-Return valid JSON only.
-Do not include markdown fences.
-`;
+    const system = `You are a conversion-rate optimisation auditor. Return valid JSON only. Do not include markdown fences.`;
 
-const user = `
+    const user = `
 Audit this website for conversion performance.
 
 Business type: ${business_type}
 Primary goal: ${goal}
 URL: ${targetUrl}
 
-Extracted signals:
+Signals:
 Title: ${basics.title}
 Meta description: ${basics.metaDesc}
 H1: ${basics.h1}
 CTA detected: ${basics.hasCTAWord}
-Contact email: ${basics.hasEmail}
-Phone: ${basics.hasPhone}
-Trust indicators detected: ${basics.hasTrustWords}
+Email detected: ${basics.hasEmail}
+Phone detected: ${basics.hasPhone}
+Trust detected: ${basics.hasTrustWords}
 
-Baseline conversion subscores:
+Baseline subscores:
 ${JSON.stringify(heur.subscores)}
 
-Return a JSON object with these keys:
+Return valid JSON only:
 {
   "summary": "string",
   "top_issues": ["string","string","string"],
-  "quick_wins": ["string","string","string"],
-  "headline_rewrite_options": ["string","string","string"],
-  "cta_rewrite_options": ["string","string","string"],
-  "recommended_homepage_sections": ["string","string","string","string","string","string"],
-  "notes_and_assumptions": ["string","string"]
+  "quick_wins": ["string","string","string"]
 }
 `;
+
     let report = null;
 
     try {
       const ai = await client.responses.create({
         model: process.env.SCORECARD_MODEL || "gpt-5-mini",
-        max_output_tokens: 1000,
+        max_output_tokens: 450,
         input: [
           { role: "system", content: system },
           { role: "user", content: user },
         ],
       });
 
-const aiText = (ai.output_text || "").trim();
+      const aiText = (ai.output_text || "").trim();
 
-let parsed = null;
-try {
-  parsed = JSON.parse(aiText);
-} catch {
-  parsed = null;
-}
+      let parsed = null;
+      try {
+        parsed = JSON.parse(aiText);
+      } catch {
+        parsed = null;
+      }
 
-report = {
-  overall_score: heur.total,
-  subscores: heur.subscores,
-  summary:
-    parsed?.summary ||
-    aiText ||
-    "PromoJet analysis completed. Here are the key conversion insights for this page.",
+      report = {
+        overall_score: heur.total,
+        subscores: heur.subscores,
+        summary:
+          parsed?.summary ||
+          aiText ||
+          "PromoJet analysis completed. Here are the key conversion insights for this page.",
 
-  top_issues:
-    parsed?.top_issues || [
-      "Review headline clarity and value proposition.",
-      "Strengthen the primary call to action.",
-      "Add clearer trust signals near the top of the page.",
-    ],
+        top_issues:
+          parsed?.top_issues || [
+            "Review headline clarity and value proposition.",
+            "Strengthen the primary call to action.",
+            "Add clearer trust signals near the top of the page.",
+          ],
 
-  quick_wins:
-    parsed?.quick_wins || [
-      "Tighten the headline to make the offer clearer.",
-      "Place one primary CTA above the fold.",
-      "Add testimonials, logos, or proof points.",
-    ],
+        quick_wins:
+          parsed?.quick_wins || [
+            "Tighten the headline to make the offer clearer.",
+            "Place one primary CTA above the fold.",
+            "Add testimonials, logos, or proof points.",
+          ],
 
-  headline_rewrite_options:
-    parsed?.headline_rewrite_options || [
-      "We help [target customer] achieve [desired outcome] with [service].",
-      "[Service] for [target customer] who want [outcome] without [pain point].",
-      "Get [outcome] with [service] built for [target customer].",
-    ],
+        headline_rewrite_options: [
+          "We help [target customer] achieve [desired outcome] with [service].",
+          "[Service] for [target customer] who want [outcome] without [pain point].",
+          "Get [outcome] with [service] built for [target customer].",
+        ],
 
-  cta_rewrite_options:
-    parsed?.cta_rewrite_options || [
-      "Get a Quote",
-      "Book a Quick Call",
-      "Request a Website Review",
-    ],
+        cta_rewrite_options: [
+          "Get a Quote",
+          "Book a Quick Call",
+          "Request a Website Review",
+        ],
 
-  recommended_homepage_sections:
-    parsed?.recommended_homepage_sections || [
-      "Hero: headline, subheadline, and primary CTA",
-      "Proof: testimonials, logos, or results",
-      "Services overview",
-      "Why choose us / differentiation",
-      "How it works",
-      "Second CTA and contact form",
-      "FAQ",
-      "Footer with trust and contact details",
-    ],
+        recommended_homepage_sections: [
+          "Hero: headline, subheadline, and primary CTA",
+          "Proof: testimonials, logos, or results",
+          "Services overview",
+          "Why choose us / differentiation",
+          "How it works",
+          "Second CTA and contact form",
+          "FAQ",
+          "Footer with trust and contact details",
+        ],
 
-  notes_and_assumptions:
-    parsed?.notes_and_assumptions || [
-      "PromoJet automated analysis completed. This report is based on on-page signals and conversion best practices.",
-      "Visual design and UX were not directly analysed.",
-    ],
-};
+        notes_and_assumptions: [
+          "PromoJet automated analysis completed. This report is based on on-page signals and conversion best practices.",
+          "Visual design and UX were not directly analysed.",
+        ],
       };
     } catch (e) {
-  report = buildFallbackReport(heur, basics);
-}
+      console.error("OPENAI ERROR:", e);
+      report = buildFallbackReport(heur, basics);
+    }
 
     return safeJson(res, 200, {
       url: targetUrl,
