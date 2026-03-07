@@ -349,7 +349,7 @@ module.exports = async function handler(req, res) {
 
     let report = null;
 
-    try {
+        try {
       const ai = await client.responses.create({
         model: process.env.SCORECARD_MODEL || "gpt-5-mini",
         max_output_tokens: 1400,
@@ -458,6 +458,58 @@ Return only JSON matching the requested schema.`,
           },
         },
       });
+
+      // Safer extraction
+      const aiText = (ai.output_text || "").trim();
+
+      // Useful diagnostics
+      console.log("OpenAI response status:", ai.status);
+      console.log("OpenAI output_text length:", aiText.length);
+
+      if (!aiText) {
+        // Check for refusal or missing content
+        const firstOutput = ai.output && ai.output[0];
+        const firstContent =
+          firstOutput &&
+          firstOutput.content &&
+          firstOutput.content[0];
+
+        if (firstContent && firstContent.type === "refusal") {
+          throw new Error(`Model refusal: ${firstContent.refusal || "No refusal text returned"}`);
+        }
+
+        throw new Error("Structured response returned empty output_text");
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(aiText);
+      } catch (parseErr) {
+        console.error("Failed JSON text:", aiText);
+        throw new Error(`Could not parse structured JSON: ${parseErr.message}`);
+      }
+
+      report = {
+        overall_score: heur.total,
+        subscores: heur.subscores,
+        summary: parsed.summary,
+        top_issues: parsed.top_issues,
+        quick_wins: parsed.quick_wins,
+        headline_rewrite_options: parsed.headline_rewrite_options,
+        cta_rewrite_options: parsed.cta_rewrite_options,
+        recommended_homepage_sections: parsed.recommended_homepage_sections,
+        notes_and_assumptions: parsed.notes_and_assumptions,
+      };
+    } catch (e) {
+      console.error("OPENAI ERROR:", e);
+
+      report = buildFallbackReport(heur, basics);
+      report.notes_and_assumptions = [
+        `Fallback mode was used because the AI request failed: ${e?.message || "Unknown error"}`,
+        "This automated analysis is based on HTML signals and a limited text sample, so it may miss visual and UX issues.",
+      ];
+    }
+      
 
       const aiText = (ai.output_text || "").trim();
       const parsed = JSON.parse(aiText);
