@@ -147,7 +147,7 @@ function heuristicScore(basics, text) {
 
   const offerHits =
     text.match(
-      /\b(website|web design|graphic design|branding|maintenance|hosting|support|conversion|seo|landing page)\b/gi
+      /\b(website|web design|graphic design|branding|maintenance|hosting|support|conversion|seo|landing page|garden|maintenance|horticulture|commercial)\b/gi
     ) || [];
   offer += Math.min(15, offerHits.length >= 6 ? 15 : offerHits.length * 2);
 
@@ -169,25 +169,25 @@ function buildFallbackReport(heur, basics) {
   const summaryParts = [];
 
   if (heur.subscores.clarity >= 14) {
-    summaryParts.push("The page appears to have a reasonably clear headline and message structure.");
+    summaryParts.push("The page appears to have reasonably clear messaging, although the commercial value proposition may still need sharpening.");
   } else if (heur.subscores.clarity >= 8) {
-    summaryParts.push("The page shows some message clarity, but the value proposition may still be too vague.");
+    summaryParts.push("The page shows some message clarity, but the value proposition may still be too vague or too weak above the fold.");
   } else {
-    summaryParts.push("The page likely lacks clear above-the-fold messaging and may not explain the offer strongly enough.");
+    summaryParts.push("The page likely lacks clear above-the-fold messaging and may not explain the offer strongly enough for cold visitors.");
   }
 
   if (heur.subscores.cta >= 14) {
-    summaryParts.push("A call to action is present and reasonably visible.");
+    summaryParts.push("A call to action appears to be present and reasonably visible, though stronger wording may improve enquiries.");
   } else if (heur.subscores.cta >= 8) {
-    summaryParts.push("A call to action appears to exist, but it may need to be more prominent or more specific.");
+    summaryParts.push("A call to action appears to exist, but it may not be prominent or persuasive enough.");
   } else {
     summaryParts.push("The page may not be guiding visitors clearly toward a next step.");
   }
 
   if (heur.subscores.trust >= 10) {
-    summaryParts.push("Some trust indicators are present, though stronger proof may still improve conversions.");
+    summaryParts.push("Some trust indicators are present, but stronger proof near conversion points would likely help.");
   } else {
-    summaryParts.push("Trust signals appear limited and could be reinforced with testimonials, results, or client proof.");
+    summaryParts.push("Trust signals appear limited and could be reinforced with testimonials, results, guarantees, or client proof.");
   }
 
   return {
@@ -199,16 +199,16 @@ function buildFallbackReport(heur, basics) {
         ? "Check whether the main headline clearly states who you help and the outcome you deliver."
         : "Missing or unclear main headline (H1).",
       basics.hasCTAWord
-        ? "A call to action was detected, but it should be checked for clarity and above-the-fold visibility."
+        ? "A call to action was detected, but it should be checked for clarity, strength, and above-the-fold visibility."
         : "No clear call-to-action language was detected.",
       basics.hasTrustWords
-        ? "Trust language exists, but it may need stronger proof such as testimonials, results, or logos."
+        ? "Trust language exists, but it may need stronger proof such as testimonials, results, logos, or guarantees."
         : "Few or no trust indicators were detected.",
     ],
     quick_wins: [
-      "Add or strengthen a clear above-the-fold headline and subheadline.",
-      "Add one strong primary call to action near the top of the page.",
-      "Add trust signals such as testimonials, client logos, or guarantees near the first CTA.",
+      "Strengthen the above-the-fold headline and subheadline so the offer is clearer within a few seconds.",
+      "Add one strong primary call to action near the top of the page and repeat it later in the page.",
+      "Add stronger proof such as testimonials, client logos, guarantees, or results near the first CTA.",
     ],
     headline_rewrite_options: [
       "We help [target customer] achieve [desired outcome] with [service].",
@@ -231,7 +231,7 @@ function buildFallbackReport(heur, basics) {
       "Footer with trust and contact details",
     ],
     notes_and_assumptions: [
-      "Fallback mode was used because the service was unavailable or over quota.",
+      "Fallback mode was used because the AI service was unavailable or over quota.",
       "This automated analysis is based on HTML signals and may miss visual and UX issues.",
     ],
   };
@@ -334,12 +334,12 @@ module.exports = async function handler(req, res) {
     try {
       const ai = await client.responses.create({
         model: process.env.SCORECARD_MODEL || "gpt-5-mini",
-        max_output_tokens: 450,
+        max_output_tokens: 1100,
         input: [
           {
             role: "system",
             content:
-              "You are a conversion-rate optimisation auditor. Return concise, practical CRO insights as strict JSON only."
+              "You are a sharp conversion-rate optimisation auditor. Return only strict JSON matching the requested schema. Be commercially useful, concrete, and specific. Do not write generic filler."
           },
           {
             role: "user",
@@ -349,23 +349,26 @@ Business type: ${business_type}
 Primary goal: ${goal}
 URL: ${targetUrl}
 
-Signals:
+Extracted signals:
 Title: ${basics.title}
 Meta description: ${basics.metaDesc}
 H1: ${basics.h1}
 CTA detected: ${basics.hasCTAWord}
 Email detected: ${basics.hasEmail}
 Phone detected: ${basics.hasPhone}
-Trust detected: ${basics.hasTrustWords}
+Trust indicators detected: ${basics.hasTrustWords}
+Form detected: ${basics.hasForm}
 
-Baseline subscores:
-${JSON.stringify(heur.subscores)}`
+Baseline conversion subscores:
+${JSON.stringify(heur.subscores)}
+
+Produce a commercially useful CRO report. The summary must be detailed, specific, and written as a real assessment of likely conversion performance.`
           }
         ],
         text: {
           format: {
             type: "json_schema",
-            name: "scorecard_ai_fields",
+            name: "promojet_full_scorecard_report",
             strict: true,
             schema: {
               type: "object",
@@ -375,17 +378,49 @@ ${JSON.stringify(heur.subscores)}`
                 top_issues: {
                   type: "array",
                   minItems: 3,
-                  maxItems: 3,
+                  maxItems: 5,
                   items: { type: "string" }
                 },
                 quick_wins: {
                   type: "array",
                   minItems: 3,
-                  maxItems: 3,
+                  maxItems: 5,
+                  items: { type: "string" }
+                },
+                headline_rewrite_options: {
+                  type: "array",
+                  minItems: 3,
+                  maxItems: 4,
+                  items: { type: "string" }
+                },
+                cta_rewrite_options: {
+                  type: "array",
+                  minItems: 3,
+                  maxItems: 4,
+                  items: { type: "string" }
+                },
+                recommended_homepage_sections: {
+                  type: "array",
+                  minItems: 6,
+                  maxItems: 10,
+                  items: { type: "string" }
+                },
+                notes_and_assumptions: {
+                  type: "array",
+                  minItems: 2,
+                  maxItems: 4,
                   items: { type: "string" }
                 }
               },
-              required: ["summary", "top_issues", "quick_wins"]
+              required: [
+                "summary",
+                "top_issues",
+                "quick_wins",
+                "headline_rewrite_options",
+                "cta_rewrite_options",
+                "recommended_homepage_sections",
+                "notes_and_assumptions"
+              ]
             }
           }
         }
@@ -397,51 +432,13 @@ ${JSON.stringify(heur.subscores)}`
       report = {
         overall_score: heur.total,
         subscores: heur.subscores,
-        summary:
-          parsed.summary ||
-          "PromoJet analysis completed. Here are the key conversion insights for this page.",
-
-        top_issues:
-          parsed.top_issues || [
-            "Review headline clarity and value proposition.",
-            "Strengthen the primary call to action.",
-            "Add clearer trust signals near the top of the page.",
-          ],
-
-        quick_wins:
-          parsed.quick_wins || [
-            "Tighten the headline to make the offer clearer.",
-            "Place one primary CTA above the fold.",
-            "Add testimonials, logos, or proof points.",
-          ],
-
-        headline_rewrite_options: [
-          "We help [target customer] achieve [desired outcome] with [service].",
-          "[Service] for [target customer] who want [outcome] without [pain point].",
-          "Get [outcome] with [service] built for [target customer].",
-        ],
-
-        cta_rewrite_options: [
-          "Get a Quote",
-          "Book a Quick Call",
-          "Request a Website Review",
-        ],
-
-        recommended_homepage_sections: [
-          "Hero: headline, subheadline, and primary CTA",
-          "Proof: testimonials, logos, or results",
-          "Services overview",
-          "Why choose us / differentiation",
-          "How it works",
-          "Second CTA and contact form",
-          "FAQ",
-          "Footer with trust and contact details",
-        ],
-
-        notes_and_assumptions: [
-          "PromoJet automated analysis completed. This report combines structured site signals with model-generated CRO insights.",
-          "Visual design and UX were not directly analysed.",
-        ],
+        summary: parsed.summary,
+        top_issues: parsed.top_issues,
+        quick_wins: parsed.quick_wins,
+        headline_rewrite_options: parsed.headline_rewrite_options,
+        cta_rewrite_options: parsed.cta_rewrite_options,
+        recommended_homepage_sections: parsed.recommended_homepage_sections,
+        notes_and_assumptions: parsed.notes_and_assumptions,
       };
     } catch (e) {
       console.error("OPENAI ERROR:", e);
