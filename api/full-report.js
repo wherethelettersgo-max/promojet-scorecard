@@ -90,7 +90,7 @@ function extractBasics(html) {
 }
 
 module.exports = async function handler(req, res) {
-  res.setHeader("X-PromoJet-Version", "full-report-v4");
+  res.setHeader("X-PromoJet-Version", "full-report-v5-boomer");
 
   const allowedOrigins = new Set([
     "https://promojet.com.au",
@@ -158,12 +158,12 @@ module.exports = async function handler(req, res) {
 
     const ai = await client.responses.create({
       model: process.env.SCORECARD_MODEL || "gpt-5-mini",
-      max_output_tokens: 1600,
+      max_output_tokens: 1700,
       input: [
         {
           role: "system",
           content:
-            "You are an expert conversion rate optimisation consultant writing the full unlocked section of a website audit. Return only strict JSON. Be specific, commercially useful, concise, and practical. Use 'Call to Action' not 'CTA'. Keep every item tight and report-ready."
+            "You are an expert conversion rate optimisation consultant writing the full unlocked section of a website audit. Return only strict JSON. Be specific, commercially useful, concise, and practical. Use 'Call to Action' not 'CTA'. Also write one short, punchy 'Boomer commentary' paragraph in plain English that sounds direct, friendly, and sharp."
         },
         {
           role: "user",
@@ -191,13 +191,15 @@ Return only JSON with:
 - cta_rewrite_options (3 items)
 - recommended_homepage_sections (6 items)
 - notes_and_assumptions (2 items)
+- boomer_commentary (1 short paragraph)
 
 Rules:
 - Make suggestions specific to this business and page.
 - Keep each headline under 90 characters.
 - Keep each Call to Action under 55 characters.
 - Keep each homepage section label under 70 characters.
-- Keep each note under 120 characters.`
+- Keep each note under 120 characters.
+- Keep Boomer commentary under 450 characters.`
         }
       ],
       text: {
@@ -244,13 +246,18 @@ Rules:
                   type: "string",
                   maxLength: 120
                 }
+              },
+              boomer_commentary: {
+                type: "string",
+                maxLength: 450
               }
             },
             required: [
               "headline_rewrite_options",
               "cta_rewrite_options",
               "recommended_homepage_sections",
-              "notes_and_assumptions"
+              "notes_and_assumptions",
+              "boomer_commentary"
             ]
           }
         }
