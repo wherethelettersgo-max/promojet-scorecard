@@ -90,7 +90,7 @@ function extractBasics(html) {
 }
 
 module.exports = async function handler(req, res) {
-  res.setHeader("X-PromoJet-Version", "full-report-v3");
+  res.setHeader("X-PromoJet-Version", "full-report-v4");
 
   const allowedOrigins = new Set([
     "https://promojet.com.au",
@@ -154,16 +154,16 @@ module.exports = async function handler(req, res) {
     const html = (await resp.text()).slice(0, maxBytes);
     const basics = extractBasics(html);
     const text = stripTags(html);
-    const pageSample = text.slice(0, 1200);
+    const pageSample = text.slice(0, 800);
 
     const ai = await client.responses.create({
       model: process.env.SCORECARD_MODEL || "gpt-5-mini",
-      max_output_tokens: 1200,
+      max_output_tokens: 1600,
       input: [
         {
           role: "system",
           content:
-            "You are an expert conversion rate optimisation consultant writing the full unlocked section of a website audit. Return only strict JSON. Be specific, commercially useful, and practical. Use 'Call to Action' not 'CTA'."
+            "You are an expert conversion rate optimisation consultant writing the full unlocked section of a website audit. Return only strict JSON. Be specific, commercially useful, concise, and practical. Use 'Call to Action' not 'CTA'. Keep every item tight and report-ready."
         },
         {
           role: "user",
@@ -189,11 +189,15 @@ ${pageSample}
 Return only JSON with:
 - headline_rewrite_options (3 items)
 - cta_rewrite_options (3 items)
-- recommended_homepage_sections (7 items)
+- recommended_homepage_sections (6 items)
 - notes_and_assumptions (2 items)
 
-Make the suggestions specific to this business and page.
-Keep each item concise enough to fit naturally in a report.`
+Rules:
+- Make suggestions specific to this business and page.
+- Keep each headline under 90 characters.
+- Keep each Call to Action under 55 characters.
+- Keep each homepage section label under 70 characters.
+- Keep each note under 120 characters.`
         }
       ],
       text: {
@@ -209,25 +213,37 @@ Keep each item concise enough to fit naturally in a report.`
                 type: "array",
                 minItems: 3,
                 maxItems: 3,
-                items: { type: "string" }
+                items: {
+                  type: "string",
+                  maxLength: 90
+                }
               },
               cta_rewrite_options: {
                 type: "array",
                 minItems: 3,
                 maxItems: 3,
-                items: { type: "string" }
+                items: {
+                  type: "string",
+                  maxLength: 55
+                }
               },
               recommended_homepage_sections: {
                 type: "array",
-                minItems: 7,
-                maxItems: 7,
-                items: { type: "string" }
+                minItems: 6,
+                maxItems: 6,
+                items: {
+                  type: "string",
+                  maxLength: 70
+                }
               },
               notes_and_assumptions: {
                 type: "array",
                 minItems: 2,
                 maxItems: 2,
-                items: { type: "string" }
+                items: {
+                  type: "string",
+                  maxLength: 120
+                }
               }
             },
             required: [
