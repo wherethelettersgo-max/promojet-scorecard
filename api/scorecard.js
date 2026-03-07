@@ -275,7 +275,6 @@ module.exports = async function handler(req, res) {
     body = body || {};
 
     const { turnstileToken } = body;
-
     if (!turnstileToken) {
       return safeJson(res, 400, { error: "Missing bot check token" });
     }
@@ -288,7 +287,6 @@ module.exports = async function handler(req, res) {
     const minuteResult = await minuteLimiter.limit(`scorecard:min:${ip}`);
     res.setHeader("X-RateLimit-Remaining", String(minuteResult.remaining));
     res.setHeader("X-RateLimit-Reset", String(minuteResult.reset));
-
     if (!minuteResult.success) {
       return safeJson(res, 429, { error: "Rate limit exceeded. Please try again shortly." });
     }
@@ -331,10 +329,21 @@ module.exports = async function handler(req, res) {
     const text = stripTags(html);
     const heur = heuristicScore(basics, text);
 
-    const system = `You are a conversion-rate optimisation auditor. Return valid JSON only. Do not include markdown fences.`;
+    let report = null;
 
-    const user = `
-Audit this website for conversion performance.
+    try {
+      const ai = await client.responses.create({
+        model: process.env.SCORECARD_MODEL || "gpt-5-mini",
+        max_output_tokens: 450,
+        input: [
+          {
+            role: "system",
+            content:
+              "You are a conversion-rate optimisation auditor. Return concise, practical CRO insights as strict JSON only."
+          },
+          {
+            role: "user",
+            content: `Audit this website for conversion performance.
 
 Business type: ${business_type}
 Primary goal: ${goal}
@@ -350,54 +359,57 @@ Phone detected: ${basics.hasPhone}
 Trust detected: ${basics.hasTrustWords}
 
 Baseline subscores:
-${JSON.stringify(heur.subscores)}
-
-Return valid JSON only:
-{
-  "summary": "string",
-  "top_issues": ["string","string","string"],
-  "quick_wins": ["string","string","string"]
-}
-`;
-
-    let report = null;
-
-    try {
-      const ai = await client.responses.create({
-        model: process.env.SCORECARD_MODEL || "gpt-5-mini",
-        max_output_tokens: 450,
-        input: [
-          { role: "system", content: system },
-          { role: "user", content: user },
+${JSON.stringify(heur.subscores)}`
+          }
         ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "scorecard_ai_fields",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                summary: { type: "string" },
+                top_issues: {
+                  type: "array",
+                  minItems: 3,
+                  maxItems: 3,
+                  items: { type: "string" }
+                },
+                quick_wins: {
+                  type: "array",
+                  minItems: 3,
+                  maxItems: 3,
+                  items: { type: "string" }
+                }
+              },
+              required: ["summary", "top_issues", "quick_wins"]
+            }
+          }
+        }
       });
 
       const aiText = (ai.output_text || "").trim();
-
-      let parsed = null;
-      try {
-        parsed = JSON.parse(aiText);
-      } catch {
-        parsed = null;
-      }
+      const parsed = JSON.parse(aiText);
 
       report = {
         overall_score: heur.total,
         subscores: heur.subscores,
         summary:
-          parsed?.summary ||
-          aiText ||
+          parsed.summary ||
           "PromoJet analysis completed. Here are the key conversion insights for this page.",
 
         top_issues:
-          parsed?.top_issues || [
+          parsed.top_issues || [
             "Review headline clarity and value proposition.",
             "Strengthen the primary call to action.",
             "Add clearer trust signals near the top of the page.",
           ],
 
         quick_wins:
-          parsed?.quick_wins || [
+          parsed.quick_wins || [
             "Tighten the headline to make the offer clearer.",
             "Place one primary CTA above the fold.",
             "Add testimonials, logos, or proof points.",
@@ -427,7 +439,7 @@ Return valid JSON only:
         ],
 
         notes_and_assumptions: [
-          "PromoJet automated analysis completed. This report is based on on-page signals and conversion best practices.",
+          "PromoJet automated analysis completed. This report combines structured site signals with model-generated CRO insights.",
           "Visual design and UX were not directly analysed.",
         ],
       };
