@@ -9,7 +9,7 @@
  *
  * Optional:
  * - SCORECARD_MAX_HTML_BYTES (default 600000)
- * - SCORECARD_MODEL (default "gpt-5-mini")
+ * - SCORECARD_MODEL (default "gpt-5.4-mini")
  */
 
 const OpenAI = require("openai");
@@ -84,6 +84,33 @@ function stripTags(html) {
     .trim();
 }
 
+function cleanInline(text) {
+  return String(text || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function uniqueNonEmpty(arr, maxItems = 8, maxLen = 120) {
+  const seen = new Set();
+  const out = [];
+
+  for (const raw of arr || []) {
+    const v = cleanInline(raw);
+    if (!v) continue;
+    if (v.length < 2 || v.length > maxLen) continue;
+
+    const key = v.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(v);
+
+    if (out.length >= maxItems) break;
+  }
+
+  return out;
+}
+
 function extractBasics(html) {
   const title = (html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] || "").trim();
 
@@ -108,7 +135,7 @@ function extractBasics(html) {
   const hasPhone = /(\+?\d[\d\s().-]{7,}\d)/.test(html);
 
   const trustRegex =
-    /\b(testimonial|reviews?|trusted|clients?|case study|results?|guarantee|rated)\b/i;
+    /\b(testimonial|reviews?|trusted|clients?|case study|results?|guarantee|rated|award|since \d{4})\b/i;
   const hasTrustWords = trustRegex.test(text);
 
   const hasForm = /<form\b/i.test(html);
@@ -125,7 +152,29 @@ function extractBasics(html) {
   };
 }
 
-function heuristicScore(basics, text) {
+function extractPromptSignals(html, text) {
+  const headingMatches = [...html.matchAll(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/gi)].map(
+    (m) => m[1]
+  );
+
+  const actionMatches = [...html.matchAll(/<(a|button)[^>]*>([\s\S]*?)<\/(a|button)>/gi)]
+    .map((m) => m[2])
+    .filter(Boolean);
+
+  const bodySentences = text
+    .split(/(?<=[.!?])\s+|[\n\r]+/)
+    .map((s) => cleanInline(s))
+    .filter((s) => s.length >= 35 && s.length <= 180);
+
+  return {
+    headings: uniqueNonEmpty(headingMatches, 8, 110),
+    actions: uniqueNonEmpty(actionMatches, 8, 60),
+    strongLines: uniqueNonEmpty(bodySentences, 8, 180),
+    shortBodySample: cleanInline(text).slice(0, 420),
+  };
+}
+
+function heuristicScore(basics, text, html) {
   let clarity = 0;
   let call_to_action = 0;
   let trust = 0;
@@ -146,17 +195,18 @@ function heuristicScore(basics, text) {
   if (basics.hasPhone) trust += 3;
 
   const hasNav =
-    /<nav\b/i.test(text) ||
-    /\b(home|about|services|portfolio|contact)\b/i.test(text);
+    /<nav\b/i.test(html) ||
+    /\b(home|about|services|portfolio|contact|pricing|book now|get started)\b/i.test(text);
   if (hasNav) structure += 8;
 
   const headingMentions =
-    (text.match(/\b(how|why|what|services|pricing|process|results)\b/gi) || []).length;
+    (text.match(/\b(how|why|what|services|pricing|process|results|reviews|contact)\b/gi) || [])
+      .length;
   if (headingMentions >= 5) structure += 7;
 
   const offerHits =
     text.match(
-      /\b(website|web design|graphic design|branding|maintenance|hosting|support|conversion|seo|landing page|garden|maintenance|horticulture|commercial)\b/gi
+      /\b(website|web design|graphic design|branding|maintenance|hosting|support|conversion|seo|landing page|marketing|strategy|consulting|service|solutions)\b/gi
     ) || [];
   offer += Math.min(15, offerHits.length >= 6 ? 15 : offerHits.length * 2);
 
@@ -179,37 +229,39 @@ function buildFallbackTeaser(heur, basics) {
 
   if (heur.subscores.clarity >= 14) {
     summaryParts.push(
-      "The page appears to have reasonably clear messaging, although the value proposition could still be sharper."
+      "The page appears to communicate its offer reasonably well, but the core promise could still be made sharper and more outcome-focused."
     );
   } else if (heur.subscores.clarity >= 8) {
     summaryParts.push(
-      "The page shows some message clarity, but the value proposition may still be too vague."
+      "The page shows some message clarity, but the value proposition may still be too broad or too vague for a fast first impression."
     );
   } else {
     summaryParts.push(
-      "The page likely lacks clear above-the-fold messaging and may not explain the offer strongly enough."
+      "The page likely needs a clearer above-the-fold message so visitors can immediately understand what is offered and why it matters."
     );
   }
 
   if (heur.subscores.call_to_action >= 14) {
     summaryParts.push(
-      "A Call to Action appears to be present, though stronger wording may improve enquiries."
+      "A Call to Action appears to be present, although it may still need stronger wording, prominence, or better placement."
     );
   } else if (heur.subscores.call_to_action >= 8) {
     summaryParts.push(
-      "A Call to Action appears to exist, but it may not be prominent or persuasive enough."
+      "A next step may exist on the page, but it may not be persuasive or visually strong enough to convert more visitors."
     );
   } else {
-    summaryParts.push("The page may not be guiding visitors clearly toward a next step.");
+    summaryParts.push(
+      "The page may not be guiding visitors cleanly toward one obvious next action, which can reduce enquiries."
+    );
   }
 
   if (heur.subscores.trust >= 10) {
     summaryParts.push(
-      "Some trust indicators are present, but stronger proof near conversion points would likely help."
+      "Some trust signals appear to be present, but they would likely work harder if surfaced closer to decision points and contact prompts."
     );
   } else {
     summaryParts.push(
-      "Trust signals appear limited and could be reinforced with testimonials, guarantees, or client proof."
+      "Trust indicators appear limited and could be strengthened with reviews, proof, results, guarantees, or client credibility markers."
     );
   }
 
@@ -222,22 +274,226 @@ function buildFallbackTeaser(heur, basics) {
         ? "Check whether the main headline clearly states who you help and the outcome you deliver."
         : "Missing or unclear main headline (H1).",
       basics.hasCallToActionWord
-        ? "A Call to Action was detected, but it should be checked for clarity and strength."
+        ? "A Call to Action was detected, but it should be checked for strength, specificity, and placement."
         : "No clear Call to Action language was detected.",
     ],
     quick_wins: [
-      "Strengthen the headline and subheadline so the offer is clearer within a few seconds.",
+      "Strengthen the headline and supporting copy so the offer is clearer within a few seconds.",
       "Add one strong primary Call to Action near the top of the page.",
     ],
     notes_and_assumptions: [
-      "Fallback mode was used because the AI service was unavailable or incomplete.",
-      "This teaser is based on HTML signals and a limited text sample.",
+      "Fallback mode was used because the AI teaser request failed or was incomplete.",
+      "This teaser is based on HTML signals and a limited page sample.",
     ],
   };
 }
 
+function teaserSchema(name) {
+  return {
+    type: "json_schema",
+    name,
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        summary: { type: "string", maxLength: 1100 },
+        top_issues: {
+          type: "array",
+          minItems: 2,
+          maxItems: 2,
+          items: { type: "string", maxLength: 160 },
+        },
+        quick_wins: {
+          type: "array",
+          minItems: 2,
+          maxItems: 2,
+          items: { type: "string", maxLength: 160 },
+        },
+        notes_and_assumptions: {
+          type: "array",
+          minItems: 2,
+          maxItems: 2,
+          items: { type: "string", maxLength: 120 },
+        },
+      },
+      required: ["summary", "top_issues", "quick_wins", "notes_and_assumptions"],
+    },
+  };
+}
+
+function getCacheKey(kind, url, businessType, goal) {
+  const raw = JSON.stringify({ kind, url, businessType, goal });
+  return `promojet:${kind}:v6:${Buffer.from(raw).toString("base64url")}`;
+}
+
+async function readCache(key) {
+  try {
+    return await redis.get(key);
+  } catch (err) {
+    console.error("CACHE READ ERROR:", err);
+    return null;
+  }
+}
+
+async function writeCache(key, value, ttlSeconds) {
+  try {
+    await redis.set(key, value, { ex: ttlSeconds });
+  } catch (err) {
+    console.error("CACHE WRITE ERROR:", err);
+  }
+}
+
+async function runTeaserAttempt({
+  model,
+  targetUrl,
+  businessType,
+  goal,
+  basics,
+  heur,
+  promptSignals,
+  maxOutputTokens,
+  schemaName,
+  compactMode = false,
+}) {
+  const userContent = compactMode
+    ? `Audit this website for conversion performance.
+
+Business type: ${businessType}
+Primary goal: ${goal}
+URL: ${targetUrl}
+
+Extracted signals:
+Title: ${basics.title}
+Meta description: ${basics.metaDesc}
+H1: ${basics.h1}
+Call to Action detected: ${basics.hasCallToActionWord}
+Email detected: ${basics.hasEmail}
+Phone detected: ${basics.hasPhone}
+Trust indicators detected: ${basics.hasTrustWords}
+Form detected: ${basics.hasForm}
+
+Baseline conversion subscores:
+${JSON.stringify(heur.subscores)}
+
+Key headings:
+${JSON.stringify(promptSignals.headings)}
+
+Likely action labels:
+${JSON.stringify(promptSignals.actions)}
+
+Body sample:
+${promptSignals.shortBodySample.slice(0, 260)}
+
+Return only JSON with:
+- summary
+- top_issues (2 items)
+- quick_wins (2 items)
+- notes_and_assumptions (2 items)
+
+Requirements:
+- Summary target: 100 to 150 words.
+- Keep it commercially useful and specific.
+- Mention what is working, what is hurting conversions, and the best near-term opportunity.
+- Keep top issues and quick wins concrete and practical.`
+    : `Audit this website for conversion performance.
+
+Business type: ${businessType}
+Primary goal: ${goal}
+URL: ${targetUrl}
+
+Extracted signals:
+Title: ${basics.title}
+Meta description: ${basics.metaDesc}
+H1: ${basics.h1}
+Call to Action detected: ${basics.hasCallToActionWord}
+Email detected: ${basics.hasEmail}
+Phone detected: ${basics.hasPhone}
+Trust indicators detected: ${basics.hasTrustWords}
+Form detected: ${basics.hasForm}
+
+Baseline conversion subscores:
+${JSON.stringify(heur.subscores)}
+
+Key headings:
+${JSON.stringify(promptSignals.headings)}
+
+Likely action labels:
+${JSON.stringify(promptSignals.actions)}
+
+Important body lines:
+${JSON.stringify(promptSignals.strongLines)}
+
+Body sample:
+${promptSignals.shortBodySample}
+
+Return only JSON with:
+- summary
+- top_issues (2 items)
+- quick_wins (2 items)
+- notes_and_assumptions (2 items)
+
+Requirements:
+- Summary target: 100 to 150 words.
+- Be specific, commercially useful, and concise.
+- Explain what is working, what is hurting conversions, and what the opportunity is.
+- Top issues must be concrete and specific.
+- Quick wins must be immediately actionable.
+- Use 'Call to Action' instead of 'CTA'.`;
+
+  const ai = await client.responses.create({
+    model,
+    max_output_tokens: maxOutputTokens,
+    input: [
+      {
+        role: "system",
+        content:
+          "You are an expert conversion rate optimisation consultant writing a website conversion teaser report. Return only strict JSON. Be specific, commercially useful, concise, and grounded in the supplied page signals. Write for business owners, not marketers. Use the phrase 'Call to Action' instead of 'CTA'.",
+      },
+      {
+        role: "user",
+        content: userContent,
+      },
+    ],
+    text: {
+      format: teaserSchema(schemaName),
+    },
+  });
+
+  const aiText = (ai.output_text || "").trim();
+
+  console.log("OpenAI teaser status:", ai.status);
+  console.log("OpenAI teaser incomplete details:", ai.incomplete_details || null);
+  console.log("OpenAI teaser output length:", aiText.length);
+
+  if (ai.status === "incomplete") {
+    throw new Error(`OpenAI teaser incomplete: ${ai.incomplete_details?.reason || "unknown_reason"}`);
+  }
+
+  if (!aiText) {
+    throw new Error("OpenAI teaser returned empty output_text");
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(aiText);
+  } catch (parseErr) {
+    console.error("Failed teaser JSON text:", aiText);
+    throw new Error(`Could not parse teaser JSON: ${parseErr.message}`);
+  }
+
+  return {
+    overall_score: heur.total,
+    subscores: heur.subscores,
+    summary: parsed.summary,
+    top_issues: parsed.top_issues,
+    quick_wins: parsed.quick_wins,
+    notes_and_assumptions: parsed.notes_and_assumptions,
+  };
+}
+
 module.exports = async function handler(req, res) {
-  res.setHeader("X-PromoJet-Version", "scorecard-split-v3");
+  res.setHeader("X-PromoJet-Version", "scorecard-split-v6");
 
   const allowedOrigins = new Set([
     "https://promojet.com.au",
@@ -307,6 +563,15 @@ module.exports = async function handler(req, res) {
 
     const targetUrl = normalizeUrl(url);
     const maxBytes = parseInt(process.env.SCORECARD_MAX_HTML_BYTES || "600000", 10);
+    const cacheKey = getCacheKey("scorecard", targetUrl, business_type, goal);
+
+    const cached = await readCache(cacheKey);
+    if (cached?.url && cached?.report) {
+      return safeJson(res, 200, {
+        ...cached,
+        cached: true,
+      });
+    }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 12000);
@@ -328,139 +593,67 @@ module.exports = async function handler(req, res) {
     const html = (await resp.text()).slice(0, maxBytes);
     const basics = extractBasics(html);
     const text = stripTags(html);
-    const pageSample = text.slice(0, 700);
-    const heur = heuristicScore(basics, text);
+    const heur = heuristicScore(basics, text, html);
+    const promptSignals = extractPromptSignals(html, text);
+    const model = process.env.SCORECARD_MODEL || "gpt-5.4-mini";
 
     let report = null;
+    let mode = "ai";
 
     try {
-      const ai = await client.responses.create({
-        model: process.env.SCORECARD_MODEL || "gpt-5-mini",
-        max_output_tokens: 1200,
-        input: [
-          {
-            role: "system",
-            content:
-              "You are an expert conversion rate optimisation consultant writing a website conversion teaser report. Return only strict JSON. Be specific and commercially useful. Write for business owners, not marketers. Use the phrase 'Call to Action' instead of 'CTA'."
-          },
-          {
-            role: "user",
-            content: `Audit this website for conversion performance.
-
-Business type: ${business_type}
-Primary goal: ${goal}
-URL: ${targetUrl}
-
-Extracted signals:
-Title: ${basics.title}
-Meta description: ${basics.metaDesc}
-H1: ${basics.h1}
-Call to Action detected: ${basics.hasCallToActionWord}
-Email detected: ${basics.hasEmail}
-Phone detected: ${basics.hasPhone}
-Trust indicators detected: ${basics.hasTrustWords}
-Form detected: ${basics.hasForm}
-
-Baseline conversion subscores:
-${JSON.stringify(heur.subscores)}
-
-Page content sample:
-${pageSample}
-
-Return only JSON with:
-- summary
-- top_issues (2 items)
-- quick_wins (2 items)
-- notes_and_assumptions (2 items)
-
-Requirements:
-- The summary must be specific, commercially useful, and concise enough to fit in 120 to 170 words.
-- Explain what is working, what is hurting conversions, and what the opportunity is.
-- Top issues must be concrete and specific.
-- Quick wins must be immediately actionable.`
-          }
-        ],
-        text: {
-          format: {
-            type: "json_schema",
-            name: "promojet_teaser_report",
-            strict: true,
-            schema: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                summary: { type: "string" },
-                top_issues: {
-                  type: "array",
-                  minItems: 2,
-                  maxItems: 2,
-                  items: { type: "string" }
-                },
-                quick_wins: {
-                  type: "array",
-                  minItems: 2,
-                  maxItems: 2,
-                  items: { type: "string" }
-                },
-                notes_and_assumptions: {
-                  type: "array",
-                  minItems: 2,
-                  maxItems: 2,
-                  items: { type: "string" }
-                }
-              },
-              required: ["summary", "top_issues", "quick_wins", "notes_and_assumptions"]
-            }
-          }
-        }
+      report = await runTeaserAttempt({
+        model,
+        targetUrl,
+        businessType: business_type,
+        goal,
+        basics,
+        heur,
+        promptSignals,
+        maxOutputTokens: 1500,
+        schemaName: "promojet_teaser_report",
+        compactMode: false,
       });
+    } catch (firstErr) {
+      console.error("OPENAI TEASER FIRST ATTEMPT ERROR:", firstErr);
 
-      const aiText = (ai.output_text || "").trim();
-
-      console.log("OpenAI teaser status:", ai.status);
-      console.log("OpenAI teaser incomplete details:", ai.incomplete_details || null);
-      console.log("OpenAI teaser output length:", aiText.length);
-
-      if (ai.status === "incomplete") {
-        throw new Error(
-          `OpenAI teaser incomplete: ${ai.incomplete_details?.reason || "unknown_reason"}`
-        );
-      }
-
-      if (!aiText) {
-        throw new Error("OpenAI teaser returned empty output_text");
-      }
-
-      let parsed;
       try {
-        parsed = JSON.parse(aiText);
-      } catch (parseErr) {
-        console.error("Failed teaser JSON text:", aiText);
-        throw new Error(`Could not parse teaser JSON: ${parseErr.message}`);
+        report = await runTeaserAttempt({
+          model,
+          targetUrl,
+          businessType: business_type,
+          goal,
+          basics,
+          heur,
+          promptSignals,
+          maxOutputTokens: 1000,
+          schemaName: "promojet_teaser_report_retry",
+          compactMode: true,
+        });
+        mode = "ai_retry";
+      } catch (retryErr) {
+        console.error("OPENAI TEASER RETRY ERROR:", retryErr);
+        report = buildFallbackTeaser(heur, basics);
+        report.notes_and_assumptions = [
+          `Fallback mode was used because the AI teaser request failed: ${retryErr?.message || "Unknown error"}`,
+          "This teaser is based on HTML signals and a limited page sample.",
+        ];
+        mode = "fallback";
       }
-
-      report = {
-        overall_score: heur.total,
-        subscores: heur.subscores,
-        summary: parsed.summary,
-        top_issues: parsed.top_issues,
-        quick_wins: parsed.quick_wins,
-        notes_and_assumptions: parsed.notes_and_assumptions,
-      };
-    } catch (e) {
-      console.error("OPENAI TEASER ERROR:", e);
-      report = buildFallbackTeaser(heur, basics);
-      report.notes_and_assumptions = [
-        `Fallback mode was used because the AI teaser request failed: ${e?.message || "Unknown error"}`,
-        "This teaser is based on HTML signals and a limited text sample.",
-      ];
     }
 
-    return safeJson(res, 200, {
+    const payload = {
       url: targetUrl,
+      mode,
+      cached: false,
       baseline: { overall: heur.total, subscores: heur.subscores, basics },
       report,
-    });
+    };
+
+    if (mode !== "fallback") {
+      await writeCache(cacheKey, payload, 60 * 60 * 24);
+    }
+
+    return safeJson(res, 200, payload);
   } catch (err) {
     return safeJson(res, 500, { error: err?.message || "Server error" });
   }
