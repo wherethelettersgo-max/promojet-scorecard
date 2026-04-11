@@ -7,17 +7,36 @@
  * Optional:
  * - SCORECARD_MAX_HTML_BYTES (default 600000)
  * - SCORECARD_MODEL (default "gpt-5.4-mini")
- * - UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN (used for caching if present)
+ * - UPSTASH_REDIS_REST_URL
+ * - UPSTASH_REDIS_REST_TOKEN
  */
 
 const OpenAI = require("openai");
 const { Redis } = require("@upstash/redis");
+const { Ratelimit } = require("@upstash/ratelimit");
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const redis =
-  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
-    ? Redis.fromEnv()
-    : null;
+
+const hasRedisEnv =
+  !!process.env.UPSTASH_REDIS_REST_URL && !!process.env.UPSTASH_REDIS_REST_TOKEN;
+
+const redis = hasRedisEnv ? Redis.fromEnv() : null;
+
+const minuteLimiter = redis
+  ? new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(5, "1 m"),
+      analytics: true,
+    })
+  : null;
+
+const dayLimiter = redis
+  ? new Ratelimit({
+      redis,
+      limiter: Ratelimit.fixedWindow(20, "1 d"),
+      analytics: true,
+    })
+  : null;
 
 function safeJson(res, status, obj) {
   res.statusCode = status;
@@ -397,7 +416,7 @@ Rules:
 }
 
 module.exports = async function handler(req, res) {
-  res.setHeader("X-PromoJet-Version", "full-report-v6-stable");
+  res.setHeader("X-PromoJet-Version", "full-report-v7-protected");
 
   const allowedOrigins = new Set([
     "https://promojet.com.au",
@@ -434,6 +453,32 @@ module.exports = async function handler(req, res) {
       }
     }
     body = body || {};
+
+    const ip =
+      (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
+      req.socket?.remoteAddress ||
+      "unknown";
+
+    if (minuteLimiter) {
+      const minuteResult = await minuteLimiter.limit(`fullreport:min:${ip}`);
+      res.setHeader("X-RateLimit-Remaining", String(minuteResult.remaining));
+      res.setHeader("X-RateLimit-Reset", String(minuteResult.reset));
+
+      if (!minuteResult.success) {
+        return safeJson(res, 429, {
+          error: "Rate limit exceeded. Please try again shortly.",
+        });
+      }
+    }
+
+    if (dayLimiter) {
+      const dayResult = await dayLimiter.limit(`fullreport:day:${ip}`);
+      if (!dayResult.success) {
+        return safeJson(res, 429, {
+          error: "Daily limit reached. Please try again tomorrow.",
+        });
+      }
+    }
 
     const {
       url,
