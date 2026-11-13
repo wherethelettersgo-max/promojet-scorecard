@@ -2,8 +2,6 @@
   "name": "promojet-scorecard",
   "private": true,
   "dependencies": {
-    "openai": "^5.0.0",
-    "@upstash/ratelimit": "^2.0.5",
-    "@upstash/redis": "^1.35.3"
+    "openai": "^5.0.0"
   }
 }

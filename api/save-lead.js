@@ -1,34 +1,16 @@
 /**
  * /api/save-lead.js
  *
+ * Emails each lead to you via Resend (https://resend.com). No database.
+ *
  * Required env vars:
- * - UPSTASH_REDIS_REST_URL
- * - UPSTASH_REDIS_REST_TOKEN
+ * - RESEND_API_KEY
+ * - LEAD_NOTIFY_EMAIL   (where leads are sent, e.g. you@promojet.com.au)
+ *
+ * Optional:
+ * - LEAD_FROM_EMAIL     (default "PromoJet Scorecard <onboarding@resend.dev>";
+ *                        use an address on a domain verified in Resend once set up)
  */
-
-const { Redis } = require("@upstash/redis");
-const { Ratelimit } = require("@upstash/ratelimit");
-
-const hasRedisEnv =
-  !!process.env.UPSTASH_REDIS_REST_URL && !!process.env.UPSTASH_REDIS_REST_TOKEN;
-
-const redis = hasRedisEnv ? Redis.fromEnv() : null;
-
-const minuteLimiter = redis
-  ? new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(10, "1 m"),
-      analytics: true,
-    })
-  : null;
-
-const dayLimiter = redis
-  ? new Ratelimit({
-      redis,
-      limiter: Ratelimit.fixedWindow(50, "1 d"),
-      analytics: true,
-    })
-  : null;
 
 function safeJson(res, status, obj) {
   res.statusCode = status;
@@ -38,6 +20,14 @@ function safeJson(res, status, obj) {
 
 function cleanText(value, maxLen) {
   return String(value || "").trim().replace(/\s+/g, " ").slice(0, maxLen);
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function normalizeWebsiteUrl(input) {
@@ -52,7 +42,75 @@ function normalizeWebsiteUrl(input) {
   }
 }
 
+async function sendLeadEmail(lead) {
+  const apiKey = process.env.RESEND_API_KEY;
+  const to = process.env.LEAD_NOTIFY_EMAIL;
+  const from = process.env.LEAD_FROM_EMAIL || "PromoJet Scorecard <onboarding@resend.dev>";
+
+  if (!apiKey || !to) {
+    throw new Error("Lead email is not configured (RESEND_API_KEY / LEAD_NOTIFY_EMAIL).");
+  }
+
+  const rows = [
+    ["Name", lead.name || "(not given)"],
+    ["Email", lead.email],
+    ["Website", lead.website_url || "(not given)"],
+    ["Score", lead.score ?? "(none)"],
+    ["Submitted", lead.created_at],
+    ["IP", lead.ip],
+  ];
+
+  const html = `<h2>New scorecard lead</h2>
+<table cellpadding="6" style="border-collapse:collapse;font-family:sans-serif;font-size:14px">
+${rows
+  .map(
+    ([k, v]) =>
+      `<tr><td style="color:#666"><strong>${escapeHtml(k)}</strong></td><td>${escapeHtml(v)}</td></tr>`
+  )
+  .join("\n")}
+</table>`;
+
+  const text = rows.map(([k, v]) => `${k}: ${v}`).join("\n");
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
+  let r;
+  try {
+    r = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to: to.split(",").map((s) => s.trim()).filter(Boolean),
+        reply_to: lead.email,
+        subject: `New scorecard lead: ${lead.website_url || lead.email}${
+          lead.score != null ? ` (score ${lead.score})` : ""
+        }`,
+        html,
+        text,
+      }),
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!r.ok) {
+    const detail = await r.text().catch(() => "");
+    console.error("RESEND ERROR:", r.status, detail);
+    throw new Error(`Email send failed (${r.status})`);
+  }
+
+  return r.json();
+}
+
 module.exports = async function handler(req, res) {
+  res.setHeader("X-PromoJet-Version", "save-lead-email-v1");
+
   const allowedOrigins = new Set([
     "https://promojet.com.au",
     "https://www.promojet.com.au",
@@ -79,10 +137,6 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    if (!redis) {
-      return safeJson(res, 500, { error: "Redis is not configured in Vercel." });
-    }
-
     let body = req.body;
     if (typeof body === "string") {
       try {
@@ -97,23 +151,6 @@ module.exports = async function handler(req, res) {
       (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
       req.socket?.remoteAddress ||
       "unknown";
-
-    const minuteResult = await minuteLimiter.limit(`savelead:min:${ip}`);
-    res.setHeader("X-RateLimit-Remaining", String(minuteResult.remaining));
-    res.setHeader("X-RateLimit-Reset", String(minuteResult.reset));
-
-    if (!minuteResult.success) {
-      return safeJson(res, 429, {
-        error: "Rate limit exceeded. Please try again shortly.",
-      });
-    }
-
-    const dayResult = await dayLimiter.limit(`savelead:day:${ip}`);
-    if (!dayResult.success) {
-      return safeJson(res, 429, {
-        error: "Daily limit reached. Please try again tomorrow.",
-      });
-    }
 
     const name = cleanText(body.name, 120);
     const email = cleanText(body.email, 254).toLowerCase();
@@ -130,10 +167,7 @@ module.exports = async function handler(req, res) {
       return safeJson(res, 400, { error: "Invalid email" });
     }
 
-    const id = `lead:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
-
     const lead = {
-      id,
       name,
       email,
       website_url,
@@ -142,20 +176,15 @@ module.exports = async function handler(req, res) {
       created_at: new Date().toISOString(),
     };
 
-    const leadJson = JSON.stringify(lead);
-    const latestByEmailKey = `lead_by_email:${email}`;
-
-    await redis.set(id, leadJson);
-    await redis.set(latestByEmailKey, leadJson);
-    await redis.lpush("leads:list", id);
+    const sent = await sendLeadEmail(lead);
 
     return safeJson(res, 200, {
       success: true,
       message: "Lead saved",
-      lead_id: id,
-      email_key: latestByEmailKey,
+      lead_id: sent?.id || null,
     });
   } catch (err) {
+    console.error("SAVE-LEAD ERROR:", err);
     return safeJson(res, 500, { error: err?.message || "Server error" });
   }
 };

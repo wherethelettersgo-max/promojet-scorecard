@@ -1,0 +1,679 @@
+<div id="promojet-scorecard"></div>
+
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async="" defer=""></script>
+
+<script>
+  (function () {
+    const SCORE_API_URL = "https://promojet-scorecard.vercel.app/api/scorecard";
+    const LEAD_API_URL = "https://promojet-scorecard.vercel.app/api/save-lead";
+    const FULL_REPORT_API_URL = "https://promojet-scorecard.vercel.app/api/full-report";
+    const TURNSTILE_SITE_KEY = "0x4AAAAAACnI4wwim2UgJ1bk";
+
+    const LOGO_URL = "https://promojet.com.au/wp-content/uploads/2025/07/Promojet-Logo-Blue-Icon-Dark.fw_.png";
+    const BOOMER_URL = "https://promojet.com.au/wp-content/uploads/2025/10/boomer-superhero.fw_.png";
+    const WEBSITE_URL = "https://promojet.com.au";
+
+    const root = document.getElementById("promojet-scorecard");
+    if (!root) return;
+
+    let turnstileToken = "";
+    let turnstileWidgetId = null;
+    let latestReport = null;
+    let latestUnlocked = null;
+    let latestUrl = "";
+
+    root.innerHTML = `
+      <style>
+        #promojet-scorecard * {
+          box-sizing: border-box;
+        }
+      </style>
+
+      <div style="max-width:900px;padding:16px;border:1px solid #e5e5e5;border-radius:14px;background:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;">
+        <h2 style="margin:0 0 6px 0;">Website Conversion Scorecard</h2>
+        <p style="margin:0 0 14px 0;opacity:.8;">Enter a URL and get a FREE conversion score analysis plus practical fix suggestions...</p>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <input id="pj-url" placeholder="https://yourwebsite.com" style="flex:1;min-width:260px;padding:12px;border:1px solid #ddd;border-radius:10px;">
+          <select id="pj-type" style="padding:12px;border:1px solid #ddd;border-radius:10px;">
+            <option value="service_business">Service business</option>
+            <option value="ecommerce">Ecommerce</option>
+            <option value="local_business" selected>Local business</option>
+            <option value="agency">Agency</option>
+          </select>
+          <select id="pj-goal" style="padding:12px;border:1px solid #ddd;border-radius:10px;">
+            <option value="generate_leads" selected>Generate leads</option>
+            <option value="sell_products">Sell products</option>
+            <option value="book_calls">Book calls</option>
+            <option value="grow_audience">Grow audience</option>
+          </select>
+          <button id="pj-run" style="padding:12px 14px;border:0;border-radius:10px;cursor:pointer;">ANALYSE</button>
+        </div>
+
+        <div style="margin-top:12px;">
+          <div id="turnstile-container"></div>
+          <div style="font-size:12px;opacity:.7;margin-top:6px;">
+            Security check helps prevent bots from hammering this tool.
+          </div>
+        </div>
+
+        <div id="pj-status" style="margin-top:12px;opacity:.85;"></div>
+        <div id="pj-result" style="margin-top:14px;"></div>
+      </div>
+    `;
+
+    const $ = (sel) => root.querySelector(sel);
+
+    function getScoreColor(score) {
+      if (score >= 85) return "#16a34a";
+      if (score >= 70) return "#2563eb";
+      if (score >= 50) return "#ea580c";
+      return "#dc2626";
+    }
+
+    function renderTurnstileWhenReady() {
+      const statusEl = $("#pj-status");
+
+      if (!TURNSTILE_SITE_KEY || TURNSTILE_SITE_KEY.includes("PASTE_YOUR_REAL")) {
+        statusEl.textContent = "Turnstile site key is missing.";
+        return;
+      }
+
+      if (typeof window.turnstile === "undefined") {
+        setTimeout(renderTurnstileWhenReady, 300);
+        return;
+      }
+
+      try {
+        turnstileWidgetId = window.turnstile.render("#turnstile-container", {
+          sitekey: TURNSTILE_SITE_KEY,
+          theme: "light",
+          callback: function (token) {
+            turnstileToken = token;
+          },
+          "expired-callback": function () {
+            turnstileToken = "";
+          },
+          "error-callback": function () {
+            turnstileToken = "";
+            statusEl.textContent = "Security check failed to load. Please refresh the page.";
+          }
+        });
+      } catch (err) {
+        statusEl.textContent = "Security check could not be rendered.";
+      }
+    }
+
+    renderTurnstileWhenReady();
+
+    $("#pj-run").addEventListener("click", async function () {
+      const url = $("#pj-url").value.trim();
+      const business_type = $("#pj-type").value;
+      const goal = $("#pj-goal").value;
+
+      if (!url) {
+        $("#pj-status").textContent = "Please enter a website URL.";
+        return;
+      }
+
+      if (!turnstileToken) {
+        $("#pj-status").textContent = "Please complete the security check.";
+        return;
+      }
+
+      latestUrl = url;
+      latestUnlocked = null;
+      $("#pj-status").textContent = "Analysing…";
+      $("#pj-result").innerHTML = "";
+
+      try {
+        const resp = await fetch(SCORE_API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url,
+            business_type,
+            goal,
+            turnstileToken
+          })
+        });
+
+        const rawText = await resp.text();
+
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}: ${rawText.slice(0, 220)}`);
+        }
+
+        const data = JSON.parse(rawText);
+        latestReport = data.report || {};
+        latestReport.overall_score = latestReport.overall_score ?? data?.baseline?.overall ?? "";
+
+        $("#pj-status").textContent = "";
+
+        $("#pj-result").innerHTML = `
+          <div style="padding:20px;border:1px solid #eee;border-radius:12px;background:#fff;">
+            <div style="margin-bottom:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+              <div style="
+                background:${getScoreColor(Number(latestReport.overall_score || 0))};
+                color:white;
+                padding:14px 18px;
+                border-radius:10px;
+                font-size:32px;
+                font-weight:700;
+                letter-spacing:1px;
+                min-width:120px;
+                text-align:center;
+              ">
+                ${escapeHtml(String(latestReport.overall_score || ""))}/100
+              </div>
+
+              <div>
+                <div style="font-size:14px;font-weight:600;letter-spacing:.04em;">
+                  PromoJet Conversion Score
+                </div>
+                <div style="font-size:13px;opacity:.7;margin-top:2px;">
+                  Automated CRO analysis
+                </div>
+              </div>
+            </div>
+
+            <p style="margin:0 0 18px 0;line-height:1.7;white-space:pre-line;">
+              ${escapeHtml(latestReport.summary || "")}
+            </p>
+
+            ${renderSection("Top issues preview", latestReport.top_issues || [])}
+            ${renderSection("Quick wins preview", latestReport.quick_wins || [])}
+
+            <div style="margin-top:18px;padding:18px;border:1px solid #ddd;border-radius:10px;background:#fafafa;">
+              <h3 style="margin:0 0 8px 0;">Unlock your FREE Page Conversion Report</h3>
+
+              <p style="margin:0 0 14px 0;opacity:.85;">
+                Get the completed conversion analysis including headline rewrites,
+                Call to Action improvements, homepage structure recommendations and download the report as a PDF. Completely FREE. We have a NO SPAMMY GARBAGE email policy.
+              </p>
+
+              <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                <input id="pj-name"
+                  placeholder="Your name"
+                  style="flex:1;min-width:200px;padding:12px;border:1px solid #ddd;border-radius:10px;">
+
+                <input id="pj-email"
+                  placeholder="Your email"
+                  style="flex:1;min-width:240px;padding:12px;border:1px solid #ddd;border-radius:10px;">
+
+                <button id="pj-unlock"
+                  style="padding:12px 16px;border:0;border-radius:10px;cursor:pointer;">
+                  Get My Full Report
+                </button>
+              </div>
+
+              <div id="pj-unlock-status" style="margin-top:12px;font-size:14px;opacity:.85;"></div>
+            </div>
+
+            <div id="pj-full-report" style="display:none;margin-top:24px;"></div>
+          </div>
+        `;
+
+        const unlockBtn = $("#pj-unlock");
+        if (unlockBtn) {
+          unlockBtn.addEventListener("click", unlockFullReport);
+        }
+
+        if (window.turnstile && turnstileWidgetId !== null) {
+          window.turnstile.reset(turnstileWidgetId);
+          turnstileToken = "";
+        }
+      } catch (e) {
+        $("#pj-status").textContent = "Error: " + (e?.message || "Unknown error");
+      }
+    });
+
+    async function unlockFullReport() {
+      const name = ($("#pj-name")?.value || "").trim();
+      const email = ($("#pj-email")?.value || "").trim();
+      const unlockStatus = $("#pj-unlock-status");
+
+      if (!email) {
+        if (unlockStatus) {
+          unlockStatus.textContent = "Please enter your email to unlock the full report.";
+        }
+        return;
+      }
+
+      if (unlockStatus) {
+        unlockStatus.textContent = "Saving your details…";
+      }
+
+      try {
+        const leadResp = await fetch(LEAD_API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            email,
+            website_url: latestUrl,
+            score: latestReport?.overall_score || null
+          })
+        });
+
+        if (!leadResp.ok) {
+          if (unlockStatus) {
+            unlockStatus.textContent =
+              "Generating your full report. (We could not save your email.)";
+          }
+        } else {
+          if (unlockStatus) {
+            unlockStatus.textContent = "Generating your full report…";
+          }
+        }
+      } catch (err) {
+        if (unlockStatus) {
+          unlockStatus.textContent =
+            "Generating your full report. (Lead capture temporarily unavailable.)";
+        }
+      }
+
+      try {
+        const fullResp = await fetch(FULL_REPORT_API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: latestUrl,
+            business_type: $("#pj-type")?.value || "service_business",
+            goal: $("#pj-goal")?.value || "generate_leads"
+          })
+        });
+
+        const rawText = await fullResp.text();
+
+        if (!fullResp.ok) {
+          throw new Error(`HTTP ${fullResp.status}: ${rawText.slice(0, 220)}`);
+        }
+
+        const fullData = JSON.parse(rawText);
+        const unlocked = fullData.report || {};
+        latestUnlocked = unlocked;
+
+        const fullReport = $("#pj-full-report");
+        if (!fullReport) return;
+
+        fullReport.style.display = "block";
+
+        fullReport.innerHTML = `
+          ${renderBoomerBlock(unlocked.boomer_commentary || "")}
+          ${renderSection("Top issues", latestReport.top_issues || [])}
+          ${renderSection("Quick wins", latestReport.quick_wins || [])}
+          ${renderSection("Headline rewrite options", unlocked.headline_rewrite_options || [])}
+          ${renderSection("Call to Action rewrite options", unlocked.cta_rewrite_options || [])}
+          ${renderOrderedSection("Recommended homepage sections", unlocked.recommended_homepage_sections || [])}
+          ${renderSection("Notes and assumptions", unlocked.notes_and_assumptions || [])}
+
+          <div style="margin-top:24px;">
+            <button id="pj-print"
+              style="padding:12px 16px;border:0;border-radius:10px;cursor:pointer;">
+              Download / Print PDF
+            </button>
+          </div>
+        `;
+
+        const printBtn = $("#pj-print");
+        if (printBtn) {
+          printBtn.addEventListener("click", function () {
+            printStandaloneReport(latestUrl, latestReport, latestUnlocked);
+          });
+        }
+
+        if (unlockStatus) {
+          unlockStatus.textContent = "";
+        }
+      } catch (err) {
+        if (unlockStatus) {
+          unlockStatus.textContent = "Error generating full report: " + (err?.message || "Unknown error");
+        }
+      }
+    }
+
+    function printStandaloneReport(url, teaser, unlocked) {
+      const win = window.open("", "_blank", "width=900,height=1200");
+
+      if (!win) {
+        alert("Popup blocked. Please allow popups for this site to print the report.");
+        return;
+      }
+
+      const html = buildStandalonePrintHtml(url, teaser, unlocked);
+
+      win.document.open();
+      win.document.write(html);
+      win.document.close();
+
+      const doPrint = function () {
+        win.focus();
+        setTimeout(function () {
+          win.print();
+          setTimeout(function () {
+            win.close();
+          }, 300);
+        }, 300);
+      };
+
+      if (win.document.readyState === "complete") {
+        doPrint();
+      } else {
+        win.onload = doPrint;
+      }
+    }
+
+    function buildStandalonePrintHtml(url, teaser, unlocked) {
+      const score = Number(teaser?.overall_score || 0);
+
+      return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PromoJet Conversion Report</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 12mm;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      color: #111;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .page {
+      width: 186mm;
+      margin: 0 auto;
+      box-sizing: border-box;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      border-bottom: 2px solid #e5e5e5;
+      padding-bottom: 14px;
+      margin-bottom: 22px;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .header-right {
+      text-align: right;
+      font-size: 13px;
+      color: #444;
+    }
+
+    .logo {
+      height: 52px;
+      max-width: 230px;
+      object-fit: contain;
+    }
+
+    .title {
+      font-size: 26px;
+      font-weight: 700;
+      margin: 0 0 4px 0;
+    }
+
+    .muted {
+      font-size: 13px;
+      color: #555;
+    }
+
+    .score-row {
+      margin: 18px 0 18px 0;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .score-box {
+      color: #fff;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 28px;
+      font-weight: 700;
+      min-width: 110px;
+      text-align: center;
+    }
+
+    h2 {
+      font-size: 18px;
+      margin: 20px 0 8px 0;
+    }
+
+    h3 {
+      font-size: 16px;
+      margin: 0 0 8px 0;
+    }
+
+    p {
+      margin: 0;
+      white-space: pre-line;
+    }
+
+    ul, ol {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    li {
+      margin: 0 0 6px 0;
+    }
+
+    .boomer {
+      margin-top: 22px;
+      padding: 16px;
+      border: 1px solid #dbeafe;
+      border-radius: 12px;
+      background: #f8fbff;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    .boomer-row {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .boomer-img {
+      width: 100px;
+      height: auto;
+      border-radius: 10px;
+      flex: 0 0 auto;
+    }
+
+    .section {
+      margin-top: 18px;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    img {
+      max-width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      <div class="header-left">
+        ${
+          LOGO_URL && !LOGO_URL.includes("PASTE_")
+            ? `<img class="logo" src="${escapeHtml(LOGO_URL)}" alt="PromoJet logo">`
+            : ""
+        }
+      </div>
+      <div class="header-right">
+        <div style="font-weight:700;">PromoJet Digital Studio</div>
+        <div>${escapeHtml(WEBSITE_URL)}</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:20px;">
+      <div class="title">PromoJet Conversion Report</div>
+      <div class="muted">Website analysed: ${escapeHtml(url || "")}</div>
+    </div>
+
+    <div class="score-row">
+      <div class="score-box" style="background:${getScoreColor(score)};">
+        ${escapeHtml(String(teaser?.overall_score || ""))}/100
+      </div>
+      <div>
+        <div style="font-size:14px;font-weight:700;">Conversion Score</div>
+        <div class="muted">Automated CRO analysis</div>
+      </div>
+    </div>
+
+    ${renderStandalonePrintParagraph("Summary", teaser?.summary || "")}
+    ${renderStandalonePrintList("Top issues", teaser?.top_issues || [])}
+    ${renderStandalonePrintList("Quick wins", teaser?.quick_wins || [])}
+    ${renderStandalonePrintBoomer(unlocked?.boomer_commentary || "")}
+    ${renderStandalonePrintList("Headline rewrite options", unlocked?.headline_rewrite_options || [])}
+    ${renderStandalonePrintList("Call to Action rewrite options", unlocked?.cta_rewrite_options || [])}
+    ${renderStandalonePrintOrderedList("Recommended homepage sections", unlocked?.recommended_homepage_sections || [])}
+    ${renderStandalonePrintList("Notes and assumptions", unlocked?.notes_and_assumptions || [])}
+  </div>
+</body>
+</html>
+      `;
+    }
+
+    function renderStandalonePrintParagraph(title, text) {
+      if (!text) return "";
+      return `
+        <div class="section">
+          <h2>${escapeHtml(title)}</h2>
+          <p>${escapeHtml(text)}</p>
+        </div>
+      `;
+    }
+
+    function renderStandalonePrintList(title, items) {
+      if (!Array.isArray(items) || items.length === 0) return "";
+      return `
+        <div class="section">
+          <h2>${escapeHtml(title)}</h2>
+          <ul>
+            ${items.map(function (x) {
+              return `<li>${escapeHtml(String(x))}</li>`;
+            }).join("")}
+          </ul>
+        </div>
+      `;
+    }
+
+    function renderStandalonePrintOrderedList(title, items) {
+      if (!Array.isArray(items) || items.length === 0) return "";
+      return `
+        <div class="section">
+          <h2>${escapeHtml(title)}</h2>
+          <ol>
+            ${items.map(function (x) {
+              return `<li>${escapeHtml(String(x))}</li>`;
+            }).join("")}
+          </ol>
+        </div>
+      `;
+    }
+
+    function renderStandalonePrintBoomer(comment) {
+      if (!comment) return "";
+      return `
+        <div class="boomer">
+          <div class="boomer-row">
+            ${
+              BOOMER_URL && !BOOMER_URL.includes("PASTE_")
+                ? `<img class="boomer-img" src="${escapeHtml(BOOMER_URL)}" alt="Boomer">`
+                : ""
+            }
+            <div style="flex:1;min-width:0;">
+              <h3>Boomer says</h3>
+              <div style="white-space:pre-line;">${escapeHtml(comment)}</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderBoomerBlock(comment) {
+      if (!comment) return "";
+
+      return `
+        <div style="margin:24px 0;padding:18px;border:1px solid #dbeafe;border-radius:14px;background:#f8fbff;">
+          <div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap;">
+            ${
+              BOOMER_URL && !BOOMER_URL.includes("PASTE_")
+                ? `<img src="${escapeHtml(BOOMER_URL)}" alt="Boomer" style="width:120px;max-width:100%;height:auto;border-radius:10px;flex:0 0 auto;">`
+                : ""
+            }
+            <div style="flex:1;min-width:220px;">
+              <div style="font-size:14px;font-weight:700;letter-spacing:.04em;margin-bottom:8px;">
+                Boomer says
+              </div>
+              <div style="line-height:1.7;white-space:pre-line;">
+                ${escapeHtml(comment)}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderSection(title, items) {
+      if (!Array.isArray(items) || items.length === 0) return "";
+      return `
+        <div style="margin-top:20px;">
+          <h3 style="margin:0 0 8px 0;">${escapeHtml(title)}</h3>
+          <ul style="margin:0;padding-left:24px;line-height:1.7;">
+            ${items.map(li).join("")}
+          </ul>
+        </div>
+      `;
+    }
+
+    function renderOrderedSection(title, items) {
+      if (!Array.isArray(items) || items.length === 0) return "";
+      return `
+        <div style="margin-top:20px;">
+          <h3 style="margin:0 0 8px 0;">${escapeHtml(title)}</h3>
+          <ol style="margin:0;padding-left:24px;line-height:1.7;">
+            ${items.map(oli).join("")}
+          </ol>
+        </div>
+      `;
+    }
+
+    function li(x) {
+      return `<li>${escapeHtml(String(x))}</li>`;
+    }
+
+    function oli(x) {
+      return `<li>${escapeHtml(String(x))}</li>`;
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+  })();
+</script>

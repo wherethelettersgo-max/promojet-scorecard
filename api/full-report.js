@@ -7,36 +7,13 @@
  * Optional:
  * - SCORECARD_MAX_HTML_BYTES (default 600000)
  * - SCORECARD_MODEL (default "gpt-5.4-mini")
- * - UPSTASH_REDIS_REST_URL
- * - UPSTASH_REDIS_REST_TOKEN
+ *
+ * Rate limiting is handled by a Vercel Firewall rule on /api/*, not in code.
  */
 
 const OpenAI = require("openai");
-const { Redis } = require("@upstash/redis");
-const { Ratelimit } = require("@upstash/ratelimit");
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-const hasRedisEnv =
-  !!process.env.UPSTASH_REDIS_REST_URL && !!process.env.UPSTASH_REDIS_REST_TOKEN;
-
-const redis = hasRedisEnv ? Redis.fromEnv() : null;
-
-const minuteLimiter = redis
-  ? new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(5, "1 m"),
-      analytics: true,
-    })
-  : null;
-
-const dayLimiter = redis
-  ? new Ratelimit({
-      redis,
-      limiter: Ratelimit.fixedWindow(20, "1 d"),
-      analytics: true,
-    })
-  : null;
 
 function safeJson(res, status, obj) {
   res.statusCode = status;
@@ -253,30 +230,6 @@ function fullReportSchema(name) {
   };
 }
 
-function getCacheKey(kind, url, businessType, goal) {
-  const raw = JSON.stringify({ kind, url, businessType, goal });
-  return `promojet:${kind}:v6:${Buffer.from(raw).toString("base64url")}`;
-}
-
-async function readCache(key) {
-  if (!redis) return null;
-  try {
-    return await redis.get(key);
-  } catch (err) {
-    console.error("CACHE READ ERROR:", err);
-    return null;
-  }
-}
-
-async function writeCache(key, value, ttlSeconds) {
-  if (!redis) return;
-  try {
-    await redis.set(key, value, { ex: ttlSeconds });
-  } catch (err) {
-    console.error("CACHE WRITE ERROR:", err);
-  }
-}
-
 async function runFullReportAttempt({
   model,
   targetUrl,
@@ -454,32 +407,6 @@ module.exports = async function handler(req, res) {
     }
     body = body || {};
 
-    const ip =
-      (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
-      req.socket?.remoteAddress ||
-      "unknown";
-
-    if (minuteLimiter) {
-      const minuteResult = await minuteLimiter.limit(`fullreport:min:${ip}`);
-      res.setHeader("X-RateLimit-Remaining", String(minuteResult.remaining));
-      res.setHeader("X-RateLimit-Reset", String(minuteResult.reset));
-
-      if (!minuteResult.success) {
-        return safeJson(res, 429, {
-          error: "Rate limit exceeded. Please try again shortly.",
-        });
-      }
-    }
-
-    if (dayLimiter) {
-      const dayResult = await dayLimiter.limit(`fullreport:day:${ip}`);
-      if (!dayResult.success) {
-        return safeJson(res, 429, {
-          error: "Daily limit reached. Please try again tomorrow.",
-        });
-      }
-    }
-
     const {
       url,
       business_type = "service_business",
@@ -492,15 +419,6 @@ module.exports = async function handler(req, res) {
 
     const targetUrl = normalizeUrl(url);
     const maxBytes = parseInt(process.env.SCORECARD_MAX_HTML_BYTES || "600000", 10);
-    const cacheKey = getCacheKey("full-report", targetUrl, business_type, goal);
-
-    const cached = await readCache(cacheKey);
-    if (cached?.url && cached?.report) {
-      return safeJson(res, 200, {
-        ...cached,
-        cached: true,
-      });
-    }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 12000);
@@ -577,10 +495,6 @@ module.exports = async function handler(req, res) {
       cached: false,
       report,
     };
-
-    if (mode !== "fallback") {
-      await writeCache(cacheKey, payload, 60 * 60 * 24 * 7);
-    }
 
     return safeJson(res, 200, payload);
   } catch (err) {
